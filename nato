@@ -1,0 +1,314 @@
+# Style-Deploy-UI-Improved.ps1
+# Improved UI (responsive TableLayoutPanel) + original deploy logic (unchanged behaviour)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# ---------- Config (unchanged behaviour) ----------
+$baseSnapshotUrl = "https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-snapshots-local/com/natwest/style"
+$baseReleaseUrl  = "https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-releases-local/com/natwest/style"
+$defaultLocalPath = "D:\Style"
+$defaultLocalPathApp = "D:\app\style"
+$logRoot = "D:\Temp\deployments"
+
+# ---------- Helpers (preserve original logging style) ----------
+function Write-Log {
+    param([string]$message, [string]$logFilePath)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $entry = "[$timestamp] $message"
+    if ($global:uiLogBox -ne $null) {
+        $global:uiLogBox.AppendText("$entry`r`n")
+        $global:uiLogBox.SelectionStart = $global:uiLogBox.Text.Length
+        $global:uiLogBox.ScrollToCaret()
+    }
+    if ($logFilePath) {
+        try { Add-Content -Path $logFilePath -Value $entry -ErrorAction SilentlyContinue } catch {}
+    }
+}
+
+function Ensure-Dirs {
+    param($targetDir, $logFilePath)
+    try {
+        if ($targetDir) { New-Item -ItemType Directory -Force -Path $targetDir | Out-Null }
+        if ($logFilePath) { New-Item -ItemType Directory -Force -Path (Split-Path $logFilePath -Parent) | Out-Null }
+    } catch {
+        Write-Log "Ensure-Dirs error: $($_.Exception.Message)" $logFilePath
+    }
+}
+
+function Build-ArtifactUrl {
+    param($artifactName, $artifactVersion)
+    $isSnapshot = $artifactVersion -like "*SNAPSHOT*"
+    if ($isSnapshot) {
+        return "$baseSnapshotUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar"
+    } else {
+        return "$baseReleaseUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar"
+    }
+}
+
+function Download-Artifact {
+    param($url, $outPath, $logFile)
+    try {
+        # Uncomment and set credentials if your Artifactory requires auth:
+        # $cred = New-Object System.Management.Automation.PSCredential("username", (ConvertTo-SecureString "password" -AsPlainText -Force))
+        # Invoke-WebRequest -Uri $url -OutFile $outPath -UseBasicParsing -Credential $cred
+
+        Invoke-WebRequest -Uri $url -OutFile $outPath -UseBasicParsing -ErrorAction Stop
+        Write-Log "Download successful to $outPath." $logFile
+        return $true
+    } catch {
+        Write-Log "Download failed: $($_.Exception.Message)" $logFile
+        return $false
+    }
+}
+
+# ---------- UI (TableLayoutPanel for clean scaling) ----------
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Style Artifact Deployment Tool"
+$form.StartPosition = "CenterScreen"
+$form.Size = New-Object System.Drawing.Size(760,560)
+$font = New-Object System.Drawing.Font("Segoe UI",10)
+$form.Font = $font
+$form.BackColor = [System.Drawing.Color]::WhiteSmoke
+
+$table = New-Object System.Windows.Forms.TableLayoutPanel
+$table.Dock = "Fill"
+$table.ColumnCount = 3
+$table.RowCount = 8
+$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,180)))
+$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent,100)))
+$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,120)))
+for ($i=0; $i -lt $table.RowCount; $i++) { $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute,40))) }
+$table.Padding = New-Object System.Windows.Forms.Padding(10)
+$form.Controls.Add($table)
+
+# Row 0: Component
+$lblComponent = New-Object System.Windows.Forms.Label; $lblComponent.Text = "Deployment Component"; $lblComponent.TextAlign = "MiddleLeft"; $lblComponent.Dock = "Fill"
+$componentBox = New-Object System.Windows.Forms.ComboBox; $componentBox.Dock = "Fill"; $componentBox.DropDownStyle = "DropDownList"; $componentBox.Items.AddRange(@("style","style-ms")); $componentBox.SelectedIndex = 0
+$btnOpenFolder = New-Object System.Windows.Forms.Button; $btnOpenFolder.Text = "Open Folder"; $btnOpenFolder.Dock = "Fill"
+$table.Controls.Add($lblComponent,0,0); $table.Controls.Add($componentBox,1,0); $table.Controls.Add($btnOpenFolder,2,0)
+
+# Row 1: Service
+$lblService = New-Object System.Windows.Forms.Label; $lblService.Text = "Service Name"; $lblService.TextAlign = "MiddleLeft"; $lblService.Dock = "Fill"
+$serviceBox = New-Object System.Windows.Forms.ComboBox; $serviceBox.Dock = "Fill"; $serviceBox.DropDownStyle = "DropDownList"
+$btnRefresh = New-Object System.Windows.Forms.Button; $btnRefresh.Text = "Refresh"; $btnRefresh.Dock = "Fill"
+$table.Controls.Add($lblService,0,1); $table.Controls.Add($serviceBox,1,1); $table.Controls.Add($btnRefresh,2,1)
+
+# Row 2: Version
+$lblVersion = New-Object System.Windows.Forms.Label; $lblVersion.Text = "Artifact Version"; $lblVersion.TextAlign = "MiddleLeft"; $lblVersion.Dock = "Fill"
+$versionBox = New-Object System.Windows.Forms.TextBox; $versionBox.Dock = "Fill"; $versionBox.Text = ""
+$btnExamples = New-Object System.Windows.Forms.Button; $btnExamples.Text = "Examples"; $btnExamples.Dock = "Fill"
+$table.Controls.Add($lblVersion,0,2); $table.Controls.Add($versionBox,1,2); $table.Controls.Add($btnExamples,2,2)
+
+# Row 3: Target folder
+$lblTarget = New-Object System.Windows.Forms.Label; $lblTarget.Text = "Target Folder"; $lblTarget.TextAlign = "MiddleLeft"; $lblTarget.Dock = "Fill"
+$targetBox = New-Object System.Windows.Forms.ComboBox; $targetBox.Dock = "Fill"; $targetBox.DropDownStyle = "DropDownList"; $targetBox.Items.AddRange(@($defaultLocalPath, $defaultLocalPathApp)); $targetBox.SelectedIndex = 0
+$btnBrowseTarget = New-Object System.Windows.Forms.Button; $btnBrowseTarget.Text = "Browse"; $btnBrowseTarget.Dock = "Fill"
+$table.Controls.Add($lblTarget,0,3); $table.Controls.Add($targetBox,1,3); $table.Controls.Add($btnBrowseTarget,2,3)
+
+# Row 4: Progress + status
+$lblProgress = New-Object System.Windows.Forms.Label; $lblProgress.Text = "Progress"; $lblProgress.TextAlign = "MiddleLeft"; $lblProgress.Dock = "Fill"
+$progressBar = New-Object System.Windows.Forms.ProgressBar; $progressBar.Dock = "Fill"; $progressBar.Style = "Continuous"; $progressBar.Value = 0
+$lblStatus = New-Object System.Windows.Forms.Label; $lblStatus.Text = "Ready"; $lblStatus.TextAlign = "MiddleLeft"; $lblStatus.Dock = "Fill"
+$table.Controls.Add($lblProgress,0,4); $table.Controls.Add($progressBar,1,4); $table.Controls.Add($lblStatus,2,4)
+
+# Row 5: Log area (span columns)
+$logBox = New-Object System.Windows.Forms.TextBox; $logBox.Multiline = $true; $logBox.ScrollBars = "Vertical"; $logBox.ReadOnly = $true; $logBox.Dock = "Fill"; $logBox.Font = $font
+$table.RowStyles[5] = New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent,100)
+$table.Controls.Add($logBox,0,5); $table.SetColumnSpan($logBox,3)
+
+# Row 6: Action buttons
+$btnPanel = New-Object System.Windows.Forms.FlowLayoutPanel; $btnPanel.FlowDirection = "RightToLeft"; $btnPanel.Dock = "Fill"
+$deployButton = New-Object System.Windows.Forms.Button; $deployButton.Text = "Deploy"; $deployButton.Width = 120; $deployButton.Height = 36
+$stopButton   = New-Object System.Windows.Forms.Button; $stopButton.Text = "Stop"; $stopButton.Width = 120; $stopButton.Height = 36; $stopButton.Enabled = $false
+$closeButton  = New-Object System.Windows.Forms.Button; $closeButton.Text = "Close"; $closeButton.Width = 100; $closeButton.Height = 36
+$btnPanel.Controls.Add($closeButton); $btnPanel.Controls.Add($stopButton); $btnPanel.Controls.Add($deployButton)
+$table.Controls.Add($btnPanel,0,6); $table.SetColumnSpan($btnPanel,3)
+
+# StatusStrip at bottom
+$status = New-Object System.Windows.Forms.StatusStrip
+$stLabel = New-Object System.Windows.Forms.ToolStripStatusLabel; $stLabel.Text = "Ready"; $status.Items.Add($stLabel); $status.Dock = "Bottom"; $form.Controls.Add($status)
+
+# Global references for helper functions
+$global:uiLogBox = $logBox
+$global:componentBox = $componentBox
+$global:serviceBox = $serviceBox
+$global:versionBox = $versionBox
+$global:targetBox = $targetBox
+$global:currentLogFile = $null
+
+# Tooltips
+$tt = New-Object System.Windows.Forms.ToolTip
+$tt.SetToolTip($componentBox,"Which component folder to deploy (affects service listing)")
+$tt.SetToolTip($versionBox,"Artifact version (eg. 1.2.3 or 1.2.3-SNAPSHOT)")
+$tt.SetToolTip($targetBox,"Target folder for this component on this server")
+
+# Folder browser dialog
+$folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+
+$btnBrowseTarget.Add_Click({
+    if ($folderBrowser.ShowDialog() -eq "OK") {
+        if (-not $targetBox.Items.Contains($folderBrowser.SelectedPath)) { $targetBox.Items.Add($folderBrowser.SelectedPath) | Out-Null }
+        $targetBox.SelectedItem = $folderBrowser.SelectedPath
+    }
+})
+$btnOpenFolder.Add_Click({
+    if ($folderBrowser.ShowDialog() -eq "OK") {
+        $componentBox.Text = Split-Path $folderBrowser.SelectedPath -Leaf
+    }
+})
+$btnExamples.Add_Click({
+    [System.Windows.Forms.MessageBox]::Show("Examples:`r`n1.0.0`r`n1.0.0-SNAPSHOT`r`n2.5.1","Version examples",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information)
+})
+
+# Populate service list (same behavior as original)
+function Populate-ServiceList {
+    $serviceBox.Items.Clear()
+    $component = $componentBox.Text
+    $path = if ($component -eq "style") { $defaultLocalPath } else { $defaultLocalPathApp }
+    if (Test-Path $path) {
+        Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [void]$serviceBox.Items.Add($_.Name)
+        }
+    }
+    if ($serviceBox.Items.Count -eq 0) {
+        Get-Service | Where-Object { $_.Name -like "*$component*" -or $_.DisplayName -like "*$component*" } | ForEach-Object {
+            [void]$serviceBox.Items.Add($_.Name)
+        }
+    }
+    if ($serviceBox.Items.Count -gt 0) { $serviceBox.SelectedIndex = 0 }
+}
+
+$btnRefresh.Add_Click({ Populate-ServiceList })
+$componentBox.Add_SelectedIndexChanged({ Populate-ServiceList })
+Populate-ServiceList
+
+# Deploy logic: runs on ThreadPool to keep UI responsive but keeps original behavior unchanged
+$stopRequested = $false
+$stopButton.Add_Click({ $stopRequested = $true; Write-Log "Stop requested by user." $global:currentLogFile })
+
+function Disable-Controls($disabled) {
+    $deployButton.Enabled = -not $disabled
+    $stopButton.Enabled   = -not $disabled
+    $componentBox.Enabled = -not $disabled
+    $serviceBox.Enabled   = -not $disabled
+    $versionBox.Enabled   = -not $disabled
+    $targetBox.Enabled    = -not $disabled
+}
+
+$deployWorker = {
+    try {
+        Disable-Controls $true
+        $progressBar.Value = 5
+        $stLabel.Text = "Preparing..."
+        $component = $componentBox.Text.Trim()
+        $artifact_name = $serviceBox.Text.Trim()
+        $artifact_version = $versionBox.Text.Trim()
+        $targetDirSelected = $targetBox.Text.Trim()
+
+        if (-not ($component -and $artifact_name -and $artifact_version)) {
+            [System.Windows.Forms.MessageBox]::Show("Please fill all fields.","Missing data",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning)
+            return
+        }
+
+        # Log file setup (same as original)
+        $dateFolderName = (Get-Date).ToString("yyyy-MM-dd")
+        $logDir = Join-Path $logRoot "logs"
+        $logDir = Join-Path $logDir $dateFolderName
+        $logFileName = "$artifact_name-$artifact_version.log"
+        $currentLog = Join-Path $logDir $logFileName
+        $global:currentLogFile = $currentLog
+        Ensure-Dirs -targetDir $targetDirSelected -logFilePath $currentLog
+
+        Write-Log "Starting deployment..." $currentLog
+        $progressBar.Value = 10
+
+        # Check service status (original script logged only)
+        $serviceStatus = Get-Service -Name $artifact_name -ErrorAction SilentlyContinue
+        if ($serviceStatus -and $serviceStatus.Status -eq 'Running') {
+            Write-Log "Service '$artifact_name' is running. Please stop it before deployment." $currentLog
+        } else {
+            Write-Log "Service '$artifact_name' is not running. Proceeding with deployment." $currentLog
+        }
+        $progressBar.Value = 20
+
+        # Build URL (exact same logic)
+        $artifactFile = "$artifact_name-$artifact_version.jar"
+        $artifactUrl = Build-ArtifactUrl -artifactName $artifact_name -artifactVersion $artifact_version
+        Write-Log "Constructed URL: $artifactUrl" $currentLog
+        $progressBar.Value = 30
+
+        # Download to temp
+        $tempFolder = Join-Path $env:TEMP "artifact-deploy"
+        New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
+        $downloadPath = Join-Path $tempFolder $artifactFile
+
+        if (-not (Download-Artifact -url $artifactUrl -outPath $downloadPath -logFile $currentLog)) {
+            Write-Log "Download failed. Aborting." $currentLog
+            $stLabel.Text = "Download failed"
+            return
+        }
+        $progressBar.Value = 50
+
+        # Determine deploy path exactly as original script did
+        # original used subfolder named after artifact_name: D:\Style\$artifact_name or D:\app\style\$artifact_name
+        $deployPath = if ($component -eq "style") { Join-Path $defaultLocalPath $artifact_name } else { Join-Path $defaultLocalPathApp $artifact_name }
+
+        if (-not (Test-Path $deployPath)) {
+            Write-Log "Deployment folder '$deployPath' does not exist." $currentLog
+            $stLabel.Text = "Target folder missing"
+            return
+        }
+        Write-Log "Navigated to deployment folder: $deployPath" $currentLog
+        $progressBar.Value = 60
+
+        # Remove existing jar (base name without version)
+        $existingJar = Join-Path $deployPath "$artifact_name.jar"
+        if (Test-Path $existingJar) {
+            try {
+                Remove-Item $existingJar -Force -ErrorAction SilentlyContinue
+                Write-Log "Removed existing jar: $existingJar" $currentLog
+            } catch {
+                Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog
+            }
+        } else {
+            Write-Log "No existing jar found to remove." $currentLog
+        }
+
+        $progressBar.Value = 80
+
+        # Copy new artifact as base name (same behaviour you edited into script)
+        $newJarPath = Join-Path $deployPath "$artifact_name.jar"
+        try {
+            Copy-Item -Path $downloadPath -Destination $newJarPath -Force -ErrorAction Stop
+            Write-Log "Copied new artifact to: $newJarPath" $currentLog
+        } catch {
+            Write-Log "Failed to copy artifact: $($_.Exception.Message)" $currentLog
+            $stLabel.Text = "Copy failed"
+            return
+        }
+
+        $progressBar.Value = 100
+        Write-Log "Deployment completed successfully." $currentLog
+        $stLabel.Text = "Completed"
+
+    } catch {
+        Write-Log "Unexpected error: $($_.Exception.Message)" $global:currentLogFile
+        $stLabel.Text = "Error"
+    } finally {
+        Disable-Controls $false
+        Start-Sleep -Milliseconds 300
+        $progressBar.Value = 0
+    }
+}
+
+$deployButton.Add_Click({
+    Disable-Controls $true
+    [System.Threading.ThreadPool]::QueueUserWorkItem($deployWorker, $null)
+})
+
+$closeButton.Add_Click({ $form.Close() })
+
+# Bring up UI
+$form.Add_Shown({ $form.Activate() })
+$form.Topmost = $true
+[void]$form.ShowDialog()
