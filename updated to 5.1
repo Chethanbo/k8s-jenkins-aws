@@ -1,6 +1,6 @@
-# Style-Deploy-UI-PS51.ps1
+# Style-Deploy-UI-PS51-FIXED.ps1
 # PowerShell 5.1 compatible UI + BackgroundWorker + safe UI marshaling
-# Save as .ps1 and run from Windows PowerShell ISE or powershell.exe -STA -File "Style-Deploy-UI-PS51.ps1"
+# Run from Windows PowerShell ISE or powershell.exe -STA -File "Style-Deploy-UI-PS51-FIXED.ps1"
 
 # --- STA auto-restart shim (place at top) ---
 try {
@@ -27,8 +27,7 @@ $defaultLocalPathApp = "D:\app\style"
 $logRoot = "D:\Temp\deployments"
 
 # ---------- Simple fatal logger ----------
-function Write-Fatal {
-    param([string]$msg)
+function Write-Fatal { param([string]$msg)
     try {
         $dateFolder = (Get-Date).ToString("yyyy-MM-dd")
         $dir = Join-Path $logRoot "logs\$dateFolder"
@@ -40,22 +39,15 @@ function Write-Fatal {
 }
 
 # ---------- Helpers ----------
-function Safe-UIInvoke {
-    param([ScriptBlock]$sb)
+function Safe-UIInvoke { param([ScriptBlock]$sb)
     try {
-        if ($form -and $form.InvokeRequired) {
-            return $form.Invoke($sb)
-        } else {
-            return & $sb
-        }
+        if ($form -and $form.InvokeRequired) { return $form.Invoke($sb) } else { return & $sb }
     } catch {
-        Write-Fatal "Safe-UIInvoke exception: $($_.Exception.Message)"
-        throw
+        Write-Fatal "Safe-UIInvoke exception: $($_.Exception.Message)"; throw
     }
 }
 
-function Write-Log {
-    param([string]$message, [string]$logFilePath)
+function Write-Log { param([string]$message, [string]$logFilePath)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $entry = "[$timestamp] $message"
     if ($global:uiLogBox -ne $null) {
@@ -65,33 +57,23 @@ function Write-Log {
             $global:uiLogBox.ScrollToCaret()
         }
     }
-    if ($logFilePath) {
-        try { Add-Content -Path $logFilePath -Value $entry -ErrorAction SilentlyContinue } catch {}
-    }
+    if ($logFilePath) { try { Add-Content -Path $logFilePath -Value $entry -ErrorAction SilentlyContinue } catch {} }
 }
 
-function Ensure-Dirs {
-    param($targetDir, $logFilePath)
+function Ensure-Dirs { param($targetDir, $logFilePath)
     try {
         if ($targetDir) { New-Item -ItemType Directory -Force -Path $targetDir | Out-Null }
         if ($logFilePath) { New-Item -ItemType Directory -Force -Path (Split-Path $logFilePath -Parent) | Out-Null }
-    } catch {
-        Write-Log "Ensure-Dirs error: $($_.Exception.Message)" $logFilePath
-    }
+    } catch { Write-Log "Ensure-Dirs error: $($_.Exception.Message)" $logFilePath }
 }
 
-function Build-ArtifactUrl {
-    param($artifactName, $artifactVersion)
+function Build-ArtifactUrl { param($artifactName, $artifactVersion)
     $isSnapshot = $artifactVersion -like "*SNAPSHOT*"
-    if ($isSnapshot) {
-        return "$baseSnapshotUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar"
-    } else {
-        return "$baseReleaseUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar"
-    }
+    if ($isSnapshot) { return "$baseSnapshotUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar" }
+    else { return "$baseReleaseUrl/$artifactName/$artifactVersion/$artifactName-$artifactVersion.jar" }
 }
 
-function Download-Artifact {
-    param($url, $outPath, $logFile)
+function Download-Artifact { param($url, $outPath, $logFile)
     try {
         Invoke-WebRequest -Uri $url -OutFile $outPath -UseBasicParsing -ErrorAction Stop
         Write-Log "Download successful to $outPath." $logFile
@@ -112,9 +94,7 @@ $form.Font = $font
 $form.BackColor = [System.Drawing.Color]::WhiteSmoke
 
 $table = New-Object System.Windows.Forms.TableLayoutPanel
-$table.Dock = "Fill"
-$table.ColumnCount = 3
-$table.RowCount = 8
+$table.Dock = "Fill"; $table.ColumnCount = 3; $table.RowCount = 8
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,180)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent,100)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,120)))
@@ -152,7 +132,7 @@ $progressBar = New-Object System.Windows.Forms.ProgressBar; $progressBar.Dock = 
 $lblStatus = New-Object System.Windows.Forms.Label; $lblStatus.Text = "Ready"; $lblStatus.TextAlign = "MiddleLeft"; $lblStatus.Dock = "Fill"
 $table.Controls.Add($lblProgress,0,4); $table.Controls.Add($progressBar,1,4); $table.Controls.Add($lblStatus,2,4)
 
-# Row 5: log area
+# Row 5: log
 $logBox = New-Object System.Windows.Forms.TextBox; $logBox.Multiline = $true; $logBox.ScrollBars = "Vertical"; $logBox.ReadOnly = $true; $logBox.Dock = "Fill"; $logBox.Font = $font
 $table.RowStyles[5] = New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent,100)
 $table.Controls.Add($logBox,0,5); $table.SetColumnSpan($logBox,3)
@@ -234,18 +214,15 @@ function Disable-Controls($disabled) {
 }
 
 # create BackgroundWorker
-if ($bw -eq $null -or -not ($bw -is [System.ComponentModel.BackgroundWorker])) {
-    $bw = New-Object System.ComponentModel.BackgroundWorker
-}
+if ($bw -eq $null -or -not ($bw -is [System.ComponentModel.BackgroundWorker])) { $bw = New-Object System.ComponentModel.BackgroundWorker }
 $bw.WorkerReportsProgress = $true
 $bw.WorkerSupportsCancellation = $true
 
-# DoWork delegate - full deploy logic inside
-$doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
-    param($sender, $e)
+# --- create handlers by casting scriptblocks to the delegate types (PS 5.1 friendly) ---
+
+$doWorkHandler = [System.ComponentModel.DoWorkEventHandler] {
+    param($sender,$e)
     try {
-        # instrumentation start
-        # set current log early so Write-Log can use it (it may be null until we compute it; that's OK)
         Write-Log "DoWork starting" $global:currentLogFile
         try { $sender.ReportProgress(1) } catch { Write-Log "ReportProgress early failed: $($_.Exception.Message)" $global:currentLogFile }
 
@@ -261,7 +238,6 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
             return
         }
 
-        # Log file setup
         $dateFolderName = (Get-Date).ToString("yyyy-MM-dd")
         $logDir = Join-Path $logRoot "logs"
         $logDir = Join-Path $logDir $dateFolderName
@@ -273,7 +249,6 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
         Write-Log "Starting deployment..." $currentLog
         $sender.ReportProgress(10)
 
-        # Check service status (non-fatal)
         $serviceStatus = Get-Service -Name $artifact_name -ErrorAction SilentlyContinue
         if ($serviceStatus -and $serviceStatus.Status -eq 'Running') {
             Write-Log "Service '$artifact_name' is running. Please stop it before deployment." $currentLog
@@ -282,13 +257,11 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
         }
         $sender.ReportProgress(20)
 
-        # Build URL
         $artifactFile = "$artifact_name-$artifact_version.jar"
         $artifactUrl = Build-ArtifactUrl -artifactName $artifact_name -artifactVersion $artifact_version
         Write-Log "Constructed URL: $artifactUrl" $currentLog
         $sender.ReportProgress(30)
 
-        # Download to temp
         $tempFolder = Join-Path $env:TEMP "artifact-deploy"
         New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
         $downloadPath = Join-Path $tempFolder $artifactFile
@@ -300,7 +273,6 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
         }
         $sender.ReportProgress(50)
 
-        # Determine deploy path
         $deployPath = if ($component -eq "style") { Join-Path $defaultLocalPath $artifact_name } else { Join-Path $defaultLocalPathApp $artifact_name }
         if (-not (Test-Path $deployPath)) {
             Write-Log "Deployment folder '$deployPath' does not exist." $currentLog
@@ -310,21 +282,12 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
         Write-Log "Navigated to deployment folder: $deployPath" $currentLog
         $sender.ReportProgress(60)
 
-        # Remove existing jar
         $existingJar = Join-Path $deployPath "$artifact_name.jar"
         if (Test-Path $existingJar) {
-            try {
-                Remove-Item $existingJar -Force -ErrorAction Stop
-                Write-Log "Removed existing jar: $existingJar" $currentLog
-            } catch {
-                Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog
-            }
-        } else {
-            Write-Log "No existing jar found to remove." $currentLog
-        }
+            try { Remove-Item $existingJar -Force -ErrorAction Stop; Write-Log "Removed existing jar: $existingJar" $currentLog } catch { Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog }
+        } else { Write-Log "No existing jar found to remove." $currentLog }
         $sender.ReportProgress(80)
 
-        # Copy new artifact
         $newJarPath = Join-Path $deployPath "$artifact_name.jar"
         try {
             Copy-Item -Path $downloadPath -Destination $newJarPath -Force -ErrorAction Stop
@@ -343,20 +306,18 @@ $doWorkHandler = [System.ComponentModel.DoWorkEventHandler]::new( {
         Write-Log "Unexpected worker error: $($_.Exception.Message)" $global:currentLogFile
         $e.Result = @{ Success = $false; Reason = "Exception"; Error = $_.Exception.Message }
     }
-} )
+}
 
-# Progress handler
-$progressHandler = [System.ComponentModel.ProgressChangedEventHandler]::new( {
-    param($s, $args)
+$progressHandler = [System.ComponentModel.ProgressChangedEventHandler] {
+    param($s,$args)
     Safe-UIInvoke {
         if ($args.ProgressPercentage -ge 0 -and $args.ProgressPercentage -le 100) { $progressBar.Value = $args.ProgressPercentage }
         $stLabel.Text = "In progress: $($args.ProgressPercentage)%"
     }
-} )
+}
 
-# Completed handler
-$completedHandler = [System.ComponentModel.RunWorkerCompletedEventHandler]::new( {
-    param($s, $args)
+$completedHandler = [System.ComponentModel.RunWorkerCompletedEventHandler] {
+    param($s,$args)
     Safe-UIInvoke {
         Disable-Controls $false
         try {
@@ -381,7 +342,7 @@ $completedHandler = [System.ComponentModel.RunWorkerCompletedEventHandler]::new(
             Write-Fatal "RunWorkerCompleted handler exception: $($_.Exception.Message)"
         }
     }
-} )
+}
 
 # detach any previous handlers (safe when re-running in ISE)
 try { $bw.remove_DoWork($null) } catch {}
@@ -393,12 +354,9 @@ $bw.add_DoWork($doWorkHandler)
 $bw.add_ProgressChanged($progressHandler)
 $bw.add_RunWorkerCompleted($completedHandler)
 
-# Deploy button wiring (instrumented)
+# Deploy button wiring
 $deployButton.Add_Click({
-    if ($bw.IsBusy) { 
-        Write-Log "Deploy clicked but worker already busy." $global:currentLogFile
-        return 
-    }
+    if ($bw.IsBusy) { Write-Log "Deploy clicked but worker already busy." $global:currentLogFile; return }
     $stopRequested = $false
     Safe-UIInvoke { Disable-Controls $true; $stLabel.Text = "Queued..."; $progressBar.Value = 0 }
     Write-Log "Deploy requested - starting BackgroundWorker." $global:currentLogFile
@@ -423,7 +381,7 @@ $stopButton.Add_Click({
 
 $closeButton.Add_Click({ $form.Close() })
 
-# top-level unhandled exception handler (extra safety)
+# top-level unhandled exception handler
 [AppDomain]::CurrentDomain.add_UnhandledException({
     param($sender,$ea)
     try {
@@ -438,9 +396,4 @@ $closeButton.Add_Click({ $form.Close() })
 $form.Add_Shown({ $form.Activate() })
 $form.Topmost = $true
 
-try {
-    [void]$form.ShowDialog()
-} catch {
-    Write-Fatal "ShowDialog threw: $($_.Exception.Message)"
-    [System.Windows.Forms.MessageBox]::Show("UI failed: $($_.Exception.Message) - see $logRoot\logs for details","UI Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
-}
+try { [void]$form.ShowDialog() } catch { Write-Fatal "ShowDialog threw: $($_.Exception.Message)"; [System.Windows.Forms.MessageBox]::Show("UI failed: $($_.Exception.Message) - see $logRoot\logs for details","UI Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
