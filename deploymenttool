@@ -1,0 +1,455 @@
+# DeployTool.ps1
+# PowerShell v5 - WinForms deployment tool for Artifactory downloads -> D: service folders
+# Written to be robust for PS5; uses WebClient for download, ZipFile for extraction.
+# Logs to D:\style\deploy.log and D:\app\style\deploy.log
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+# --- Configuration / Log paths (edit if you prefer) ---
+$Global:LogPaths = @("D:\style\deploy.log", "D:\app\style\deploy.log")
+foreach ($p in $Global:LogPaths) {
+    $dir = Split-Path $p -Parent
+    if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
+    if (-not (Test-Path $p)) { New-Item -Path $p -ItemType File -Force | Out-Null }
+}
+
+function Log-Message {
+    param([string]$Message, [string]$Level = "INFO")
+    $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    $line = "$ts [$Level] $Message"
+    foreach ($lp in $Global:LogPaths) { Add-Content -Path $lp -Value $line -Force }
+    # append to UI output if present
+    if ($Global:OutputBox) {
+        $Global:OutputBox.AppendText("$line`r`n")
+        $Global:OutputBox.SelectionStart = $Global:OutputBox.Text.Length
+        $Global:OutputBox.ScrollToCaret()
+    }
+}
+
+function Stop-ServiceIfRunning {
+    param([string]$ServiceName)
+    try {
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) { return }
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($null -eq $svc) {
+            Log-Message "Service '$ServiceName' not found." "WARN"
+            return
+        }
+        if ($svc.Status -ne 'Stopped') {
+            Log-Message "Stopping service '$ServiceName'..."
+            Stop-Service -Name $ServiceName -Force -ErrorAction Stop
+            # Wait for stopped
+            $svc.WaitForStatus('Stopped', (New-TimeSpan -Seconds 30))
+            Log-Message "Service '$ServiceName' stopped."
+        } else {
+            Log-Message "Service '$ServiceName' already stopped."
+        }
+    } catch {
+        Log-Message "Failed to stop service '$ServiceName': $_" "ERROR"
+        throw $_
+    }
+}
+
+function Start-ServiceIfExists {
+    param([string]$ServiceName)
+    try {
+        if ([string]::IsNullOrWhiteSpace($ServiceName)) { return }
+        $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($null -eq $svc) {
+            Log-Message "Service '$ServiceName' not found for start." "WARN"
+            return
+        }
+        Log-Message "Starting service '$ServiceName'..."
+        Start-Service -Name $ServiceName -ErrorAction Stop
+        $svc.WaitForStatus('Running', (New-TimeSpan -Seconds 30))
+        Log-Message "Service '$ServiceName' started."
+    } catch {
+        Log-Message "Failed to start service '$ServiceName': $_" "ERROR"
+        throw $_
+    }
+}
+
+function Backup-Folder {
+    param([string]$TargetFolder)
+    try {
+        if (-not (Test-Path $TargetFolder)) {
+            Log-Message "No existing target folder found at $TargetFolder — skipping backup."
+            return $null
+        }
+        $ts = (Get-Date).ToString("yyyyMMdd_HHmmss")
+        $parent = Split-Path $TargetFolder -Parent
+        $name = Split-Path $TargetFolder -Leaf
+        $backupRoot = "D:\backup"
+        if (-not (Test-Path $backupRoot)) { New-Item -Path $backupRoot -ItemType Directory -Force | Out-Null }
+        $dest = Join-Path $backupRoot "$name`_$ts"
+        Log-Message "Backing up $TargetFolder -> $dest ..."
+        Copy-Item -Path $TargetFolder -Destination $dest -Recurse -Force -ErrorAction Stop
+        Log-Message "Backup completed: $dest"
+        return $dest
+    } catch {
+        Log-Message "Backup failed: $_" "ERROR"
+        throw $_
+    }
+}
+
+function Extract-ZipSafe {
+    param([string]$ZipPath, [string]$Destination)
+    try {
+        if (-not (Test-Path $ZipPath)) { throw "Zip not found: $ZipPath" }
+        if (-not (Test-Path $Destination)) { New-Item -Path $Destination -ItemType Directory -Force | Out-Null }
+        Log-Message "Extracting $ZipPath -> $Destination"
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $Destination)
+        Log-Message "Extraction complete."
+    } catch {
+        Log-Message "Extraction failed: $_" "ERROR"
+        throw $_
+    }
+}
+
+function Copy-DeployFiles {
+    param([string]$SourceFolder, [string]$TargetFolder)
+    try {
+        Log-Message "Deploying files from $SourceFolder -> $TargetFolder"
+        if (-not (Test-Path $SourceFolder)) { throw "Source folder not found: $SourceFolder" }
+        if (-not (Test-Path $TargetFolder)) { New-Item -Path $TargetFolder -ItemType Directory -Force | Out-Null }
+        # Copy content (overwrite)
+        Copy-Item -Path (Join-Path $SourceFolder '*') -Destination $TargetFolder -Recurse -Force -ErrorAction Stop
+        Log-Message "Files copied successfully."
+    } catch {
+        Log-Message "Deploy copy failed: $_" "ERROR"
+        throw $_
+    }
+}
+
+function Download-Artifact {
+    param(
+        [string]$DownloadUrl,
+        [string]$OutFile,
+        [string]$User,
+        [string]$Pass,
+        [System.Windows.Forms.ProgressBar]$ProgressBar,
+        [System.Windows.Forms.Label]$ProgressLabel
+    )
+    $wc = New-Object System.Net.WebClient
+
+    if (-not [string]::IsNullOrWhiteSpace($User)) {
+        # Basic auth header
+        $pair = "$User`:$Pass"
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($pair)
+        $b64 = [System.Convert]::ToBase64String($bytes)
+        $wc.Headers.Add("Authorization","Basic $b64")
+    }
+
+    $downloadComplete = $false
+    $errorOccured = $null
+
+    $wc.DownloadProgressChanged += {
+        param($sender,$e)
+        if ($ProgressBar) {
+            $ProgressBar.Value = [int]$e.ProgressPercentage
+        }
+        if ($ProgressLabel) {
+            $ProgressLabel.Text = "Downloading: $($e.ProgressPercentage)% ($([Math]::Round($e.BytesReceived/1KB,2)) KB / $([Math]::Round($e.TotalBytesToReceive/1KB,2)) KB)"
+        }
+    }
+
+    $wc.DownloadFileCompleted += {
+        param($sender,$e)
+        if ($e.Error) {
+            $errorOccured = $e.Error
+        } elseif ($e.Cancelled) {
+            $errorOccured = "Cancelled"
+        } else {
+            $downloadComplete = $true
+        }
+    }
+
+    try {
+        Log-Message "Starting download: $DownloadUrl -> $OutFile"
+        $uri = [System.Uri]::new($DownloadUrl)
+        $wc.DownloadFileAsync($uri, $OutFile)
+
+        # Wait until done (simple loop)
+        while (-not $downloadComplete -and -not $errorOccured) {
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        if ($errorOccured) { throw $errorOccured }
+
+        Log-Message "Download finished: $OutFile"
+        return $OutFile
+    } catch {
+        Log-Message "Download error: $_" "ERROR"
+        throw $_
+    } finally {
+        $wc.Dispose()
+    }
+}
+
+# ---------- Build UI ----------
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Deployment Tool - Artifactory -> D: (PowerShell v5)"
+$form.Width = 760
+$form.Height = 560
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+
+$lblUrl = New-Object System.Windows.Forms.Label
+$lblUrl.Text = "Artifact Download URL or Artifactory path:"
+$lblUrl.AutoSize = $true
+$lblUrl.Location = [System.Drawing.Point]::new(10,14)
+$form.Controls.Add($lblUrl)
+
+$txtUrl = New-Object System.Windows.Forms.TextBox
+$txtUrl.Location = [System.Drawing.Point]::new(10,34)
+$txtUrl.Width = 720
+$form.Controls.Add($txtUrl)
+
+$lblUser = New-Object System.Windows.Forms.Label
+$lblUser.Text = "Username (optional):"
+$lblUser.Location = [System.Drawing.Point]::new(10,70)
+$lblUser.AutoSize = $true
+$form.Controls.Add($lblUser)
+
+$txtUser = New-Object System.Windows.Forms.TextBox
+$txtUser.Location = [System.Drawing.Point]::new(130,66)
+$txtUser.Width = 200
+$form.Controls.Add($txtUser)
+
+$lblPass = New-Object System.Windows.Forms.Label
+$lblPass.Text = "Password (optional):"
+$lblPass.Location = [System.Drawing.Point]::new(350,70)
+$lblPass.AutoSize = $true
+$form.Controls.Add($lblPass)
+
+$txtPass = New-Object System.Windows.Forms.TextBox
+$txtPass.Location = [System.Drawing.Point]::new(470,66)
+$txtPass.Width = 260
+$txtPass.UseSystemPasswordChar = $true
+$form.Controls.Add($txtPass)
+
+$lblTarget = New-Object System.Windows.Forms.Label
+$lblTarget.Text = "Target service folder on D: (choose folder):"
+$lblTarget.Location = [System.Drawing.Point]::new(10,100)
+$lblTarget.AutoSize = $true
+$form.Controls.Add($lblTarget)
+
+$txtTarget = New-Object System.Windows.Forms.TextBox
+$txtTarget.Location = [System.Drawing.Point]::new(10,120)
+$txtTarget.Width = 610
+$form.Controls.Add($txtTarget)
+
+$btnBrowse = New-Object System.Windows.Forms.Button
+$btnBrowse.Text = "Browse..."
+$btnBrowse.Location = [System.Drawing.Point]::new(630,118)
+$btnBrowse.Width = 100
+$form.Controls.Add($btnBrowse)
+
+$lblServiceName = New-Object System.Windows.Forms.Label
+$lblServiceName.Text = "Windows service name to stop/start (optional):"
+$lblServiceName.Location = [System.Drawing.Point]::new(10,155)
+$lblServiceName.AutoSize = $true
+$form.Controls.Add($lblServiceName)
+
+$txtService = New-Object System.Windows.Forms.TextBox
+$txtService.Location = [System.Drawing.Point]::new(10,175)
+$txtService.Width = 300
+$form.Controls.Add($txtService)
+
+$chkBackup = New-Object System.Windows.Forms.CheckBox
+$chkBackup.Text = "Create backup of existing folder before deploy (recommended)"
+$chkBackup.Checked = $true
+$chkBackup.Location = [System.Drawing.Point]::new(320,173)
+$chkBackup.AutoSize = $true
+$form.Controls.Add($chkBackup)
+
+$lblOptions = New-Object System.Windows.Forms.Label
+$lblOptions.Text = "Options:"
+$lblOptions.Location = [System.Drawing.Point]::new(10,205)
+$lblOptions.AutoSize = $true
+$form.Controls.Add($lblOptions)
+
+$chkExtract = New-Object System.Windows.Forms.CheckBox
+$chkExtract.Text = "Extract ZIP artifact after download (if applicable)"
+$chkExtract.Checked = $true
+$chkExtract.Location = [System.Drawing.Point]::new(80,203)
+$chkExtract.AutoSize = $true
+$form.Controls.Add($chkExtract)
+
+$lblProgress = New-Object System.Windows.Forms.Label
+$lblProgress.Text = "Progress:"
+$lblProgress.Location = [System.Drawing.Point]::new(10,235)
+$lblProgress.AutoSize = $true
+$form.Controls.Add($lblProgress)
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = [System.Drawing.Point]::new(10,255)
+$progressBar.Width = 720
+$progressBar.Height = 23
+$progressBar.Minimum = 0
+$progressBar.Maximum = 100
+$form.Controls.Add($progressBar)
+
+$lblProgressText = New-Object System.Windows.Forms.Label
+$lblProgressText.Text = "Idle"
+$lblProgressText.AutoSize = $true
+$lblProgressText.Location = [System.Drawing.Point]::new(10,285)
+$form.Controls.Add($lblProgressText)
+
+$btnDeploy = New-Object System.Windows.Forms.Button
+$btnDeploy.Text = "Deploy"
+$btnDeploy.Location = [System.Drawing.Point]::new(10,315)
+$btnDeploy.Width = 100
+$form.Controls.Add($btnDeploy)
+
+$btnCancel = New-Object System.Windows.Forms.Button
+$btnCancel.Text = "Exit"
+$btnCancel.Location = [System.Drawing.Point]::new(130,315)
+$btnCancel.Width = 100
+$form.Controls.Add($btnCancel)
+
+$OutputBox = New-Object System.Windows.Forms.TextBox
+$OutputBox.Multiline = $true
+$OutputBox.ScrollBars = "Vertical"
+$OutputBox.ReadOnly = $true
+$OutputBox.Width = 720
+$OutputBox.Height = 170
+$OutputBox.Location = [System.Drawing.Point]::new(10,350)
+$form.Controls.Add($OutputBox)
+
+# store global UI refs for logging
+$Global:OutputBox = $OutputBox
+$Global:ProgressBar = $progressBar
+$Global:ProgressLabel = $lblProgressText
+
+# Browse button action
+$btnBrowse.Add_Click({
+    $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+    $fbd.Description = "Select the target service folder on D:"
+    $fbd.RootFolder = "MyComputer"
+    $fbd.ShowNewFolderButton = $true
+    if ($fbd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $txtTarget.Text = $fbd.SelectedPath
+    }
+})
+
+# Cancel / Exit
+$btnCancel.Add_Click({
+    $form.Close()
+})
+
+# Deploy button action
+$btnDeploy.Add_Click({
+    try {
+        $btnDeploy.Enabled = $false
+        $btnBrowse.Enabled = $false
+        $btnCancel.Enabled = $false
+        $txtUrl.Enabled = $false
+        $txtUser.Enabled = $false
+        $txtPass.Enabled = $false
+        $txtTarget.Enabled = $false
+        $txtService.Enabled = $false
+        $chkBackup.Enabled = $false
+        $chkExtract.Enabled = $false
+
+        $url = $txtUrl.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($url)) { throw "Please provide the artifact download URL or path." }
+
+        $target = $txtTarget.Text.Trim()
+        if ([string]::IsNullOrWhiteSpace($target)) { throw "Please select a target folder on D: to deploy to." }
+
+        # target must be on D:
+        if (-not ($target -like "D:\*")) {
+            throw "Target folder must be on D: drive (e.g. D:\MyService)."
+        }
+
+        $user = $txtUser.Text.Trim()
+        $pass = $txtPass.Text # may be empty
+        $svcName = $txtService.Text.Trim()
+        $doBackup = $chkBackup.Checked
+        $doExtract = $chkExtract.Checked
+
+        # Prepare temp paths
+        $tempRoot = Join-Path $env:TEMP ("DeployTool_" + [System.Guid]::NewGuid().ToString())
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        $outFile = Join-Path $tempRoot ([System.IO.Path]::GetFileName($url))
+        if ([string]::IsNullOrWhiteSpace([System.IO.Path]::GetFileName($url))) {
+            # fallback filename
+            $outFile = Join-Path $tempRoot "artifact.bin"
+        }
+
+        Log-Message "Starting deployment process..."
+        $lblProgressText.Text = "Preparing..."
+        $progressBar.Value = 0
+
+        # Stop service if provided
+        if (-not [string]::IsNullOrWhiteSpace($svcName)) {
+            Stop-ServiceIfRunning -ServiceName $svcName
+        }
+
+        # Backup
+        $backupDest = $null
+        if ($doBackup) {
+            $backupDest = Backup-Folder -TargetFolder $target
+        }
+
+        # Download
+        Download-Artifact -DownloadUrl $url -OutFile $outFile -User $user -Pass $pass -ProgressBar $progressBar -ProgressLabel $lblProgressText
+
+        # If extract and zip, extract to temp and deploy files; else copy file or directory
+        $isZip = $false
+        try { $ext = [System.IO.Path]::GetExtension($outFile).ToLower() } catch { $ext = "" }
+        if ($doExtract -and $ext -eq ".zip") {
+            $isZip = $true
+            $extractFolder = Join-Path $tempRoot "extracted"
+            Extract-ZipSafe -ZipPath $outFile -Destination $extractFolder
+            # Deploy files from $extractFolder -> $target
+            Copy-DeployFiles -SourceFolder $extractFolder -TargetFolder $target
+        } else {
+            # Not a zip: if it's a single file (e.g. exe or msi) - copy into target
+            if (Test-Path $outFile -PathType Leaf) {
+                Copy-DeployFiles -SourceFolder (Split-Path $outFile -Parent) -TargetFolder $target
+                # If you prefer to copy only the file:
+                # Copy-Item -Path $outFile -Destination $target -Force
+            } else {
+                # If artifact is a folder (rare), copy folder content
+                Copy-DeployFiles -SourceFolder $outFile -TargetFolder $target
+            }
+        }
+
+        # Start service if provided
+        if (-not [string]::IsNullOrWhiteSpace($svcName)) {
+            Start-ServiceIfExists -ServiceName $svcName
+        }
+
+        $lblProgressText.Text = "Completed"
+        $progressBar.Value = 100
+        Log-Message "Deployment finished successfully." "INFO"
+        [System.Windows.Forms.MessageBox]::Show("Deployment completed successfully.","Done",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+    } catch {
+        $lblProgressText.Text = "Error"
+        Log-Message "Deployment failed: $_" "ERROR"
+        [System.Windows.Forms.MessageBox]::Show("Deployment failed:`n$($_.Exception.Message)","Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    } finally {
+        # re-enable
+        $btnDeploy.Enabled = $true
+        $btnBrowse.Enabled = $true
+        $btnCancel.Enabled = $true
+        $txtUrl.Enabled = $true
+        $txtUser.Enabled = $true
+        $txtPass.Enabled = $true
+        $txtTarget.Enabled = $true
+        $txtService.Enabled = $true
+        $chkBackup.Enabled = $true
+        $chkExtract.Enabled = $true
+        # cleanup temp? keep for debug; you can remove it automatically if desired
+        Log-Message "Temporary working folder: $tempRoot"
+    }
+})
+
+# Show the form
+[void] $form.ShowDialog()
