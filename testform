@@ -1,0 +1,83 @@
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Where test log will be written
+$testLog = "C:\Temp\bw-test.log"
+if (-not (Test-Path (Split-Path $testLog))) { New-Item -ItemType Directory -Force -Path (Split-Path $testLog) | Out-Null }
+"===== test start $(Get-Date -Format o) =====" | Out-File -FilePath $testLog -Encoding utf8 -Append
+
+$form = New-Object System.Windows.Forms.Form
+$form.Size = [System.Drawing.Size]::new(400,200)
+$form.StartPosition = "CenterScreen"
+
+$lbl = New-Object System.Windows.Forms.Label
+$lbl.Text = "Ready"
+$lbl.AutoSize = $true
+$lbl.Location = [System.Drawing.Point]::new(20,20)
+$form.Controls.Add($lbl)
+
+$btn = New-Object System.Windows.Forms.Button
+$btn.Text = "Start Test"
+$btn.Location = [System.Drawing.Point]::new(20,60)
+$form.Controls.Add($btn)
+
+# Create BackgroundWorker
+$bw = New-Object System.ComponentModel.BackgroundWorker
+$bw.WorkerReportsProgress = $true
+$bw.WorkerSupportsCancellation = $true
+
+# DoWork handler - writes file and sleeps a bit
+$doWorkHandler = [System.ComponentModel.DoWorkEventHandler] {
+    param($s,$e)
+    # write immediately to disk so we can see it
+    "DoWork entered at $(Get-Date -Format o)" | Out-File -FilePath $testLog -Append -Encoding utf8
+    try {
+        for ($i=1; $i -le 5; $i++) {
+            Start-Sleep -Milliseconds 300
+            $s.ReportProgress([int]($i * 20))
+            "DoWork progress $i at $(Get-Date -Format o)" | Out-File -FilePath $testLog -Append -Encoding utf8
+        }
+        $e.Result = @{ Success = $true; Message = "Test completed" }
+    } catch {
+        $e.Result = @{ Success = $false; Error = $_.Exception.Message }
+    }
+}
+
+# Progress handler
+$progressHandler = [System.ComponentModel.ProgressChangedEventHandler] {
+    param($s,$args)
+    $lbl.Text = "Progress: $($args.ProgressPercentage)%"
+}
+
+# Completed handler
+$completedHandler = [System.ComponentModel.RunWorkerCompletedEventHandler] {
+    param($s,$args)
+    "RunWorkerCompleted: args.Error=$($args.Error -ne $null) args.Result=$($args.Result -ne $null) at $(Get-Date -Format o)" | Out-File -FilePath $testLog -Append -Encoding utf8
+    if ($args.Error) {
+        [System.Windows.Forms.MessageBox]::Show("Worker threw: $($args.Error.Message)","Test", [System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+    } elseif ($args.Result -and $args.Result.Success) {
+        [System.Windows.Forms.MessageBox]::Show("Worker succeeded: $($args.Result.Message)","Test", [System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information)
+    } else {
+        [System.Windows.Forms.MessageBox]::Show("Worker completed but no result","Test", [System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning)
+    }
+}
+
+# Attach handlers
+$bw.add_DoWork($doWorkHandler)
+$bw.add_ProgressChanged($progressHandler)
+$bw.add_RunWorkerCompleted($completedHandler)
+
+# Button click starts worker
+$btn.Add_Click({
+    try {
+        "Button clicked. Starting worker at $(Get-Date -Format o)" | Out-File -FilePath $testLog -Append -Encoding utf8
+        $bw.RunWorkerAsync()
+    } catch {
+        "RunWorkerAsync threw: $($_.Exception.Message)" | Out-File -FilePath $testLog -Append -Encoding utf8
+        [System.Windows.Forms.MessageBox]::Show("Start failed: $($_.Exception.Message)","Test", [System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+    }
+})
+
+$form.Topmost = $true
+$form.Add_Shown({ $form.Activate() })
+[void]$form.ShowDialog()
