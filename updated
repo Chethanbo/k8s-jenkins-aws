@@ -1,4 +1,4 @@
-# Style-Deploy-UI-Improved-FIXED.ps1
+# Style-Deploy-UI-Defensive.ps1
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
@@ -9,21 +9,33 @@ $defaultLocalPath = "D:\Style"
 $defaultLocalPathApp = "D:\app\style"
 $logRoot = "D:\Temp\deployments"
 
+# ---------- Simple fatal logger (for top-level errors) ----------
+function Write-Fatal {
+    param([string]$msg)
+    try {
+        $dateFolder = (Get-Date).ToString("yyyy-MM-dd")
+        $dir = Join-Path $logRoot "logs\$dateFolder"
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $f = Join-Path $dir "fatal-exception.log"
+        $entry = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg"
+        Add-Content -Path $f -Value $entry -ErrorAction SilentlyContinue
+    } catch {}
+}
+
 # ---------- Helpers (preserve original logging style) ----------
 function Write-Log {
     param([string]$message, [string]$logFilePath)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $entry = "[$timestamp] $message"
     if ($global:uiLogBox -ne $null) {
-        # Append UI text safely via Safe-UIInvoke (will be defined later)
-        Safe-UIInvoke { 
+        Safe-UIInvoke {
             $global:uiLogBox.AppendText("$entry`r`n")
             $global:uiLogBox.SelectionStart = $global:uiLogBox.Text.Length
             $global:uiLogBox.ScrollToCaret()
         }
     }
     if ($logFilePath) {
-        try { Add-Content -Path $logFilePath -Value $entry -ErrorAction SilentlyContinue } catch {}
+        try { Add-Content -Path $logFilePath -Value $entry -ErrorAction SilentlyContinue } catch { }
     }
 }
 
@@ -71,11 +83,16 @@ $form.BackColor = [System.Drawing.Color]::WhiteSmoke
 # Helper to safely run scriptblocks on the UI thread
 function Safe-UIInvoke {
     param([ScriptBlock]$sb)
-    if ($form -and $form.InvokeRequired) {
-        # Invoke will run on UI thread and return result
-        return $form.Invoke($sb)
-    } else {
-        return & $sb
+    try {
+        if ($form -and $form.InvokeRequired) {
+            return $form.Invoke($sb)
+        } else {
+            return & $sb
+        }
+    } catch {
+        # If invoking fails, write a fatal log so we can inspect the problem
+        Write-Fatal "Safe-UIInvoke exception: $($_.Exception.Message)"
+        throw
     }
 }
 
@@ -191,7 +208,7 @@ $btnRefresh.Add_Click({ Populate-ServiceList })
 $componentBox.Add_SelectedIndexChanged({ Populate-ServiceList })
 Populate-ServiceList
 
-# Deploy logic: runs on ThreadPool to keep UI responsive but keeps original behavior unchanged
+# -------------- Defensive deploy implementation with BackgroundWorker --------------
 $stopRequested = $false
 $stopButton.Add_Click({ $stopRequested = $true; Write-Log "Stop requested by user." $global:currentLogFile })
 
@@ -204,23 +221,30 @@ function Disable-Controls($disabled) {
     $targetBox.Enabled    = -not $disabled
 }
 
-$deployWorker = {
-    try {
-        # All UI touches must be marshalled to UI thread
-        Safe-UIInvoke { Disable-Controls $true }
-        Safe-UIInvoke { $progressBar.Value = 5; $stLabel.Text = "Preparing..." }
+# create BackgroundWorker
+$bw = New-Object System.ComponentModel.BackgroundWorker
+$bw.WorkerReportsProgress = $true
+$bw.WorkerSupportsCancellation = $true
 
-        $component = $componentBox.Text.Trim()
-        $artifact_name = $serviceBox.Text.Trim()
-        $artifact_version = $versionBox.Text.Trim()
-        $targetDirSelected = $targetBox.Text.Trim()
+$bw.DoWork += {
+    param($sender,$e)
+    try {
+        $senderProgress = $sender
+        $report = { param($p) $senderProgress.ReportProgress($p) }
+
+        $report.Invoke(5)
+        # capture UI values safely
+        $component = Safe-UIInvoke { $componentBox.Text.Trim() }
+        $artifact_name = Safe-UIInvoke { $serviceBox.Text.Trim() }
+        $artifact_version = Safe-UIInvoke { $versionBox.Text.Trim() }
+        $targetDirSelected = Safe-UIInvoke { $targetBox.Text.Trim() }
 
         if (-not ($component -and $artifact_name -and $artifact_version)) {
             Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Please fill all fields.","Missing data",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning) }
+            $e.Result = @{ Success = $false; Reason = "Missing fields" }
             return
         }
 
-        # Log file setup (same as original)
         $dateFolderName = (Get-Date).ToString("yyyy-MM-dd")
         $logDir = Join-Path $logRoot "logs"
         $logDir = Join-Path $logDir $dateFolderName
@@ -230,95 +254,141 @@ $deployWorker = {
         Ensure-Dirs -targetDir $targetDirSelected -logFilePath $currentLog
 
         Write-Log "Starting deployment..." $currentLog
-        Safe-UIInvoke { $progressBar.Value = 10 }
+        $report.Invoke(10)
 
-        # Check service status (original script logged only)
         $serviceStatus = Get-Service -Name $artifact_name -ErrorAction SilentlyContinue
         if ($serviceStatus -and $serviceStatus.Status -eq 'Running') {
             Write-Log "Service '$artifact_name' is running. Please stop it before deployment." $currentLog
         } else {
             Write-Log "Service '$artifact_name' is not running. Proceeding with deployment." $currentLog
         }
-        Safe-UIInvoke { $progressBar.Value = 20 }
+        $report.Invoke(20)
 
-        # Build URL (exact same logic)
         $artifactFile = "$artifact_name-$artifact_version.jar"
         $artifactUrl = Build-ArtifactUrl -artifactName $artifact_name -artifactVersion $artifact_version
         Write-Log "Constructed URL: $artifactUrl" $currentLog
-        Safe-UIInvoke { $progressBar.Value = 30 }
+        $report.Invoke(30)
 
-        # Download to temp
         $tempFolder = Join-Path $env:TEMP "artifact-deploy"
         New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
         $downloadPath = Join-Path $tempFolder $artifactFile
 
         if (-not (Download-Artifact -url $artifactUrl -outPath $downloadPath -logFile $currentLog)) {
             Write-Log "Download failed. Aborting." $currentLog
-            Safe-UIInvoke { $stLabel.Text = "Download failed" }
+            $e.Result = @{ Success = $false; Reason = "Download failed" }
             return
         }
-        Safe-UIInvoke { $progressBar.Value = 50 }
+        $report.Invoke(50)
 
-        # Determine deploy path exactly as original script did
         $deployPath = if ($component -eq "style") { Join-Path $defaultLocalPath $artifact_name } else { Join-Path $defaultLocalPathApp $artifact_name }
-
         if (-not (Test-Path $deployPath)) {
             Write-Log "Deployment folder '$deployPath' does not exist." $currentLog
-            Safe-UIInvoke { $stLabel.Text = "Target folder missing" }
+            $e.Result = @{ Success = $false; Reason = "Target folder missing"; DeployPath = $deployPath }
             return
         }
         Write-Log "Navigated to deployment folder: $deployPath" $currentLog
-        Safe-UIInvoke { $progressBar.Value = 60 }
+        $report.Invoke(60)
 
-        # Remove existing jar (base name without version)
         $existingJar = Join-Path $deployPath "$artifact_name.jar"
         if (Test-Path $existingJar) {
-            try {
-                Remove-Item $existingJar -Force -ErrorAction SilentlyContinue
-                Write-Log "Removed existing jar: $existingJar" $currentLog
-            } catch {
-                Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog
-            }
-        } else {
-            Write-Log "No existing jar found to remove." $currentLog
-        }
+            try { Remove-Item $existingJar -Force -ErrorAction Stop; Write-Log "Removed existing jar: $existingJar" $currentLog } catch { Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog }
+        } else { Write-Log "No existing jar found to remove." $currentLog }
 
-        Safe-UIInvoke { $progressBar.Value = 80 }
+        $report.Invoke(80)
 
-        # Copy new artifact as base name (same behaviour you edited into script)
         $newJarPath = Join-Path $deployPath "$artifact_name.jar"
         try {
             Copy-Item -Path $downloadPath -Destination $newJarPath -Force -ErrorAction Stop
             Write-Log "Copied new artifact to: $newJarPath" $currentLog
         } catch {
             Write-Log "Failed to copy artifact: $($_.Exception.Message)" $currentLog
-            Safe-UIInvoke { $stLabel.Text = "Copy failed" }
+            $e.Result = @{ Success = $false; Reason = "Copy failed"; Error = $_.Exception.Message }
             return
         }
 
-        Safe-UIInvoke { $progressBar.Value = 100 }
+        $report.Invoke(100)
         Write-Log "Deployment completed successfully." $currentLog
-        Safe-UIInvoke { $stLabel.Text = "Completed" }
+        $e.Result = @{ Success = $true }
 
     } catch {
-        Write-Log "Unexpected error: $($_.Exception.Message)" $global:currentLogFile
-        Safe-UIInvoke { $stLabel.Text = "Error" }
-    } finally {
-        Safe-UIInvoke { Disable-Controls $false }
-        Start-Sleep -Milliseconds 300
-        Safe-UIInvoke { $progressBar.Value = 0 }
+        Write-Log "Unexpected worker error: $($_.Exception.Message)" $global:currentLogFile
+        $e.Result = @{ Success = $false; Reason = "Exception"; Error = $_.Exception.Message }
+    }
+}
+
+$bw.ProgressChanged += {
+    param($sender,$args)
+    Safe-UIInvoke {
+        if ($args.ProgressPercentage -ge 0 -and $args.ProgressPercentage -le 100) { $progressBar.Value = $args.ProgressPercentage }
+        $stLabel.Text = "In progress: $($args.ProgressPercentage)%"
+    }
+}
+
+$bw.RunWorkerCompleted += {
+    param($sender,$args)
+    Safe-UIInvoke {
+        Disable-Controls $false
+        try {
+            if ($args.Error) {
+                Write-Log "BackgroundWorker error: $($args.Error.Message)" $global:currentLogFile
+                $stLabel.Text = "Error"
+                [System.Windows.Forms.MessageBox]::Show("Deployment failed: $($args.Error.Message)","Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+            } else {
+                $res = $args.Result
+                if ($res -and $res.Success) {
+                    $stLabel.Text = "Completed"
+                    $progressBar.Value = 0
+                } else {
+                    $stLabel.Text = "Failed"
+                    $progressBar.Value = 0
+                    $text = if ($res) { "Reason: $($res.Reason)`r`n$($res.Error)" } else { "Unknown failure" }
+                    Write-Log "Deployment failed result: $text" $global:currentLogFile
+                    [System.Windows.Forms.MessageBox]::Show("Deployment failed.`r`n$text","Failed",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning)
+                }
+            }
+        } catch {
+            Write-Fatal "RunWorkerCompleted handler exception: $($_.Exception.Message)"
+        }
     }
 }
 
 $deployButton.Add_Click({
-    # prevent double-click shotgun
-    Safe-UIInvoke { Disable-Controls $true }
-    [System.Threading.ThreadPool]::QueueUserWorkItem($deployWorker, $null) | Out-Null
+    if ($bw.IsBusy) { return }
+    $stopRequested = $false
+    Safe-UIInvoke { Disable-Controls $true; $stLabel.Text = "Queued..."; $progressBar.Value = 0 }
+    $bw.RunWorkerAsync()
+})
+
+$stopButton.Add_Click({
+    if ($bw.IsBusy -and $bw.WorkerSupportsCancellation) {
+        $stopRequested = $true
+        $bw.CancelAsync()
+        Write-Log "Stop requested (BackgroundWorker)." $global:currentLogFile
+    }
 })
 
 $closeButton.Add_Click({ $form.Close() })
+# -------------- end deploy block --------------
+
+# ---------- Top-level unhandled exception handler ----------
+[AppDomain]::CurrentDomain.add_UnhandledException({
+    param($sender,$ea)
+    try {
+        $ex = $ea.ExceptionObject
+        $msg = if ($ex -is [System.Exception]) { $ex.Message } else { $ex.ToString() }
+        Write-Fatal "Unhandled exception: $msg"
+        Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Fatal error: $msg","Fatal",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
+    } catch {}
+})
 
 # Bring up UI
 $form.Add_Shown({ $form.Activate() })
 $form.Topmost = $true
-[void]$form.ShowDialog()
+
+try {
+    [void]$form.ShowDialog()
+} catch {
+    # Log and show any top-level exception thrown by ShowDialog
+    Write-Fatal "ShowDialog threw: $($_.Exception.Message)"
+    [System.Windows.Forms.MessageBox]::Show("UI failed: $($_.Exception.Message) - see $logRoot\logs for details","UI Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+}
