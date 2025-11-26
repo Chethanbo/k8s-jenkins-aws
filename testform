@@ -1,5 +1,5 @@
-# Style-Deploy-UI-FINAL-FIXED.ps1
-# PowerShell 5.1 ready. Run from Windows PowerShell ISE or powershell.exe -STA -File "Style-Deploy-UI-FINAL-FIXED.ps1"
+# Style-Deploy-UI-Threaded.ps1
+# Thread-based runner — PowerShell 5.1 friendly. Run from Windows PowerShell ISE or powershell.exe -STA -File "Style-Deploy-UI-Threaded.ps1"
 
 # --- STA auto-restart shim ---
 try { $apartment = [System.Threading.Thread]::CurrentThread.GetApartmentState().ToString() } catch { $apartment = "Unknown" }
@@ -112,7 +112,7 @@ function Download-Artifact { param($url, $outPath, $logFile)
 
 # ---------- UI layout ----------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Style Artifact Deployment Tool (PS 5.1)"
+$form.Text = "Style Artifact Deployment Tool (Threaded)"
 $form.StartPosition = "CenterScreen"
 $form.Size = New-Object System.Drawing.Size(760,560)
 $font = New-Object System.Drawing.Font("Segoe UI",10)
@@ -120,9 +120,7 @@ $form.Font = $font
 $form.BackColor = [System.Drawing.Color]::WhiteSmoke
 
 $table = New-Object System.Windows.Forms.TableLayoutPanel
-$table.Dock = "Fill"
-$table.ColumnCount = 3
-$table.RowCount = 8
+$table.Dock = "Fill"; $table.ColumnCount = 3; $table.RowCount = 8
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,180)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent,100)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute,120)))
@@ -130,42 +128,36 @@ for ($i=0; $i -lt $table.RowCount; $i++) { $table.RowStyles.Add((New-Object Syst
 $table.Padding = New-Object System.Windows.Forms.Padding(10)
 $form.Controls.Add($table)
 
-# Row 0
+# Row controls (same layout as before)
 $lblComponent = New-Object System.Windows.Forms.Label; $lblComponent.Text = "Deployment Component"; $lblComponent.TextAlign = "MiddleLeft"; $lblComponent.Dock = "Fill"
 $componentBox = New-Object System.Windows.Forms.ComboBox; $componentBox.Dock = "Fill"; $componentBox.DropDownStyle = "DropDownList"; $componentBox.Items.AddRange(@("style","style-ms")); $componentBox.SelectedIndex = 0
 $btnOpenFolder = New-Object System.Windows.Forms.Button; $btnOpenFolder.Text = "Open Folder"; $btnOpenFolder.Dock = "Fill"
 $table.Controls.Add($lblComponent,0,0); $table.Controls.Add($componentBox,1,0); $table.Controls.Add($btnOpenFolder,2,0)
 
-# Row 1
 $lblService = New-Object System.Windows.Forms.Label; $lblService.Text = "Service Name"; $lblService.TextAlign = "MiddleLeft"; $lblService.Dock = "Fill"
 $serviceBox = New-Object System.Windows.Forms.ComboBox; $serviceBox.Dock = "Fill"; $serviceBox.DropDownStyle = "DropDownList"
 $btnRefresh = New-Object System.Windows.Forms.Button; $btnRefresh.Text = "Refresh"; $btnRefresh.Dock = "Fill"
 $table.Controls.Add($lblService,0,1); $table.Controls.Add($serviceBox,1,1); $table.Controls.Add($btnRefresh,2,1)
 
-# Row 2
 $lblVersion = New-Object System.Windows.Forms.Label; $lblVersion.Text = "Artifact Version"; $lblVersion.TextAlign = "MiddleLeft"; $lblVersion.Dock = "Fill"
 $versionBox = New-Object System.Windows.Forms.TextBox; $versionBox.Dock = "Fill"; $versionBox.Text = ""
 $btnExamples = New-Object System.Windows.Forms.Button; $btnExamples.Text = "Examples"; $btnExamples.Dock = "Fill"
 $table.Controls.Add($lblVersion,0,2); $table.Controls.Add($versionBox,1,2); $table.Controls.Add($btnExamples,2,2)
 
-# Row 3
 $lblTarget = New-Object System.Windows.Forms.Label; $lblTarget.Text = "Target Folder"; $lblTarget.TextAlign = "MiddleLeft"; $lblTarget.Dock = "Fill"
 $targetBox = New-Object System.Windows.Forms.ComboBox; $targetBox.Dock = "Fill"; $targetBox.DropDownStyle = "DropDownList"; $targetBox.Items.AddRange(@($defaultLocalPath, $defaultLocalPathApp)); $targetBox.SelectedIndex = 0
 $btnBrowseTarget = New-Object System.Windows.Forms.Button; $btnBrowseTarget.Text = "Browse"; $btnBrowseTarget.Dock = "Fill"
 $table.Controls.Add($lblTarget,0,3); $table.Controls.Add($targetBox,1,3); $table.Controls.Add($btnBrowseTarget,2,3)
 
-# Row 4
 $lblProgress = New-Object System.Windows.Forms.Label; $lblProgress.Text = "Progress"; $lblProgress.TextAlign = "MiddleLeft"; $lblProgress.Dock = "Fill"
 $progressBar = New-Object System.Windows.Forms.ProgressBar; $progressBar.Dock = "Fill"; $progressBar.Style = "Continuous"; $progressBar.Value = 0
 $lblStatus = New-Object System.Windows.Forms.Label; $lblStatus.Text = "Ready"; $lblStatus.TextAlign = "MiddleLeft"; $lblStatus.Dock = "Fill"
 $table.Controls.Add($lblProgress,0,4); $table.Controls.Add($progressBar,1,4); $table.Controls.Add($lblStatus,2,4)
 
-# Row 5: log area (span)
 $logBox = New-Object System.Windows.Forms.TextBox; $logBox.Multiline = $true; $logBox.ScrollBars = "Vertical"; $logBox.ReadOnly = $true; $logBox.Dock = "Fill"; $logBox.Font = $font
 $table.RowStyles[5] = New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent,100)
 $table.Controls.Add($logBox,0,5); $table.SetColumnSpan($logBox,3)
 
-# Row 6: actions
 $btnPanel = New-Object System.Windows.Forms.FlowLayoutPanel; $btnPanel.FlowDirection = "RightToLeft"; $btnPanel.Dock = "Fill"
 $deployButton = New-Object System.Windows.Forms.Button; $deployButton.Text = "Deploy"; $deployButton.Width = 120; $deployButton.Height = 36
 $stopButton   = New-Object System.Windows.Forms.Button; $stopButton.Text = "Stop"; $stopButton.Width = 120; $stopButton.Height = 36; $stopButton.Enabled = $false
@@ -173,17 +165,18 @@ $closeButton  = New-Object System.Windows.Forms.Button; $closeButton.Text = "Clo
 $btnPanel.Controls.Add($closeButton); $btnPanel.Controls.Add($stopButton); $btnPanel.Controls.Add($deployButton)
 $table.Controls.Add($btnPanel,0,6); $table.SetColumnSpan($btnPanel,3)
 
-# statusstrip
 $status = New-Object System.Windows.Forms.StatusStrip
 $stLabel = New-Object System.Windows.Forms.ToolStripStatusLabel; $stLabel.Text = "Ready"; $status.Items.Add($stLabel); $status.Dock = "Bottom"; $form.Controls.Add($status)
 
-# global refs
+# globals
 $global:uiLogBox = $logBox
 $global:componentBox = $componentBox
 $global:serviceBox = $serviceBox
 $global:versionBox = $versionBox
 $global:targetBox = $targetBox
 $global:currentLogFile = $null
+$global:deployThread = $null
+$stopRequested = $false
 
 # tooltips & dialogs
 $tt = New-Object System.Windows.Forms.ToolTip
@@ -207,7 +200,7 @@ $btnExamples.Add_Click({
     [System.Windows.Forms.MessageBox]::Show("Examples:`r`n1.0.0`r`n1.0.0-SNAPSHOT`r`n2.5.1","Version examples",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information)
 })
 
-# populate service list
+# Populate service list
 function Populate-ServiceList {
     $serviceBox.Items.Clear()
     $component = $componentBox.Text
@@ -224,10 +217,7 @@ $btnRefresh.Add_Click({ Populate-ServiceList })
 $componentBox.Add_SelectedIndexChanged({ Populate-ServiceList })
 Populate-ServiceList
 
-# ---------------- BackgroundWorker wiring (PS 5.1) ----------------
-$stopRequested = $false
-$stopButton.Add_Click({ $stopRequested = $true; Write-Log "Stop requested by user." $global:currentLogFile })
-
+# Disable/Enable controls
 function Disable-Controls($disabled) {
     $deployButton.Enabled = -not $disabled
     $stopButton.Enabled   = -not $disabled
@@ -237,29 +227,23 @@ function Disable-Controls($disabled) {
     $targetBox.Enabled    = -not $disabled
 }
 
-if ($bw -eq $null -or -not ($bw -is [System.ComponentModel.BackgroundWorker])) { $bw = New-Object System.ComponentModel.BackgroundWorker }
-$bw.WorkerReportsProgress = $true
-$bw.WorkerSupportsCancellation = $true
-
-# ---------- Deploy core as a named function (called from inline delegate) ----------
+# --- Deploy core (same logic) ---
 function Deploy-WorkerCore {
-    param($Sender, $E)
-
+    # This function runs on background thread. Use Safe-UIInvoke to touch UI.
     try {
-        # immediate checkpoint
         Write-Log "Deploy-WorkerCore: entered" $global:currentLogFile
-        try { $Sender.ReportProgress(1) } catch { Write-Log "ReportProgress early failed: $($_.Exception.Message)" $global:currentLogFile }
+        Safe-UIInvoke { $progressBar.Value = 5; $stLabel.Text = "Preparing..." }
 
         # capture UI values
         $component = Safe-UIInvoke { $componentBox.Text.Trim() }
         $artifact_name = Safe-UIInvoke { $serviceBox.Text.Trim() }
         $artifact_version = Safe-UIInvoke { $versionBox.Text.Trim() }
         $targetDirSelected = Safe-UIInvoke { $targetBox.Text.Trim() }
-        Write-Log "Deploy-WorkerCore: UI values -> component='$component', artifact='$artifact_name', version='$artifact_version', targetBase='$targetDirSelected'" $global:currentLogFile
 
         if (-not ($component -and $artifact_name -and $artifact_version)) {
-            Write-Log "Deploy-WorkerCore: missing fields" $global:currentLogFile
-            $E.Result = @{ Success = $false; Reason = "Missing fields"; Component=$component; Artifact=$artifact_name; Version=$artifact_version }
+            Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Please fill all fields.","Missing data",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning) }
+            Write-Log "Deploy-WorkerCore: missing fields" $null
+            Safe-UIInvoke { $stLabel.Text = "Missing data"; Disable-Controls $false }
             return
         }
 
@@ -272,8 +256,8 @@ function Deploy-WorkerCore {
         $global:currentLogFile = $currentLog
         Ensure-Dirs -targetDir $targetDirSelected -logFilePath $currentLog
 
-        Write-Log "Deploy-WorkerCore: Starting deployment..." $currentLog
-        $Sender.ReportProgress(10)
+        Write-Log "Starting deployment..." $currentLog
+        Safe-UIInvoke { $progressBar.Value = 10; $stLabel.Text = "Starting..." }
 
         # Check service status
         $serviceStatus = Get-Service -Name $artifact_name -ErrorAction SilentlyContinue
@@ -282,44 +266,44 @@ function Deploy-WorkerCore {
         } else {
             Write-Log "Service '$artifact_name' is not running. Proceeding with deployment." $currentLog
         }
-        $Sender.ReportProgress(20)
+        Safe-UIInvoke { $progressBar.Value = 20 }
 
         # Build URL
         $artifactFile = "$artifact_name-$artifact_version.jar"
         $artifactUrl = Build-ArtifactUrl -artifactName $artifact_name -artifactVersion $artifact_version
-        Write-Log "Deploy-WorkerCore: Constructed URL: $artifactUrl" $currentLog
-        $Sender.ReportProgress(30)
+        Write-Log "Constructed URL: $artifactUrl" $currentLog
+        Safe-UIInvoke { $progressBar.Value = 30 }
 
         # Download to temp
         $tempFolder = Join-Path $env:TEMP "artifact-deploy"
         New-Item -ItemType Directory -Force -Path $tempFolder | Out-Null
         $downloadPath = Join-Path $tempFolder $artifactFile
-        Write-Log "Deploy-WorkerCore: downloadPath -> $downloadPath" $currentLog
+        Write-Log "Download path: $downloadPath" $currentLog
 
         if (-not (Download-Artifact -url $artifactUrl -outPath $downloadPath -logFile $currentLog)) {
-            Write-Log "Deploy-WorkerCore: Download failed" $currentLog
-            $E.Result = @{ Success = $false; Reason = "Download failed"; Url = $artifactUrl }
+            Write-Log "Download failed. Aborting." $currentLog
+            Safe-UIInvoke { $stLabel.Text = "Download failed"; Disable-Controls $false }
             return
         }
-        $Sender.ReportProgress(50)
-        Write-Log "Deploy-WorkerCore: download succeeded" $currentLog
+        Safe-UIInvoke { $progressBar.Value = 50 }
 
         # Determine deploy path
         $deployPath = if ($component -eq "style") { Join-Path $defaultLocalPath $artifact_name } else { Join-Path $defaultLocalPathApp $artifact_name }
-        Write-Log "Deploy-WorkerCore: deployPath -> $deployPath" $currentLog
         if (-not (Test-Path $deployPath)) {
-            Write-Log "Deploy-WorkerCore: deployPath does not exist" $currentLog
-            $E.Result = @{ Success = $false; Reason = "Target folder missing"; DeployPath = $deployPath }
+            Write-Log "Deployment folder '$deployPath' does not exist." $currentLog
+            Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Target folder missing: $deployPath","Target missing",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning) }
+            Safe-UIInvoke { $stLabel.Text = "Target missing"; Disable-Controls $false }
             return
         }
-        $Sender.ReportProgress(60)
+        Write-Log "Navigated to deployment folder: $deployPath" $currentLog
+        Safe-UIInvoke { $progressBar.Value = 60 }
 
         # Remove existing jar
         $existingJar = Join-Path $deployPath "$artifact_name.jar"
         if (Test-Path $existingJar) {
             try { Remove-Item $existingJar -Force -ErrorAction Stop; Write-Log "Removed existing jar: $existingJar" $currentLog } catch { Write-Log "Failed removing existing jar: $($_.Exception.Message)" $currentLog }
         } else { Write-Log "No existing jar found to remove." $currentLog }
-        $Sender.ReportProgress(80)
+        Safe-UIInvoke { $progressBar.Value = 80 }
 
         # Copy new artifact
         $newJarPath = Join-Path $deployPath "$artifact_name.jar"
@@ -328,104 +312,64 @@ function Deploy-WorkerCore {
             Write-Log "Copied new artifact to: $newJarPath" $currentLog
         } catch {
             Write-Log "Failed to copy artifact: $($_.Exception.Message)" $currentLog
-            $E.Result = @{ Success = $false; Reason = "Copy failed"; Error = $_.Exception.Message }
+            Safe-UIInvoke { $stLabel.Text = "Copy failed"; Disable-Controls $false }
             return
         }
 
-        $Sender.ReportProgress(100)
-        Write-Log "Deploy-WorkerCore: completed successfully" $currentLog
-        $E.Result = @{ Success = $true; DeployPath = $deployPath; Jar = $newJarPath }
-        return
+        Safe-UIInvoke { $progressBar.Value = 100; $stLabel.Text = "Completed" }
+        Write-Log "Deployment completed successfully." $currentLog
+        Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Deployment completed successfully.","Success",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information) }
+        Safe-UIInvoke { Disable-Controls $false }
 
     } catch {
-        Write-Log "Deploy-WorkerCore: UNEXPECTED EXCEPTION: $($_.Exception.Message)`n$($_.Exception.StackTrace)" $global:currentLogFile
-        Write-Fatal "Deploy-WorkerCore unexpected: $($_.Exception.Message)"
-        $E.Result = @{ Success = $false; Reason = "Exception"; Error = $_.Exception.Message; Stack = $_.Exception.StackTrace }
+        Write-Log "Deploy worker unexpected: $($_.Exception.Message)`n$($_.Exception.StackTrace)" $global:currentLogFile
+        Write-Fatal "Deploy worker unexpected: $($_.Exception.Message)"
+        Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Deployment thread failed: $($_.Exception.Message)","Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
+        Safe-UIInvoke { $stLabel.Text = "Error"; Disable-Controls $false }
+    }
+}
+
+# Deploy thread starter
+$deployButton.Add_Click({
+    # prevent multiple starts
+    if ($global:deployThread -and $global:deployThread.IsAlive) {
+        Write-Log "Deploy clicked but thread already running." $global:currentLogFile
         return
     }
-}
 
-# ---------- Inline DoWork delegate attaches here (fix for ISE re-runs) ----------
-$bw.add_DoWork([System.ComponentModel.DoWorkEventHandler]{
-    param($sender,$e)
-    # call the named core function which sets $e.Result on every exit path
-    Deploy-WorkerCore -Sender $sender -E $e
-})
+    $stopRequested = $false
+    Disable-Controls $true
+    Safe-UIInvoke { $stLabel.Text = "Queued..."; $progressBar.Value = 0 }
+    Write-Log "Deploy requested - starting thread." $null
 
-# Progress handler (delegate casting)
-$progressHandler = [System.ComponentModel.ProgressChangedEventHandler] {
-    param($s,$args)
-    Safe-UIInvoke {
-        if ($args.ProgressPercentage -ge 0 -and $args.ProgressPercentage -le 100) { $progressBar.Value = $args.ProgressPercentage }
-        $stLabel.Text = "In progress: $($args.ProgressPercentage)%"
-    }
-}
-
-# Diagnostic RunWorkerCompleted handler (logs args.Error and args.Result)
-$completedHandler = [System.ComponentModel.RunWorkerCompletedEventHandler] {
-    param($s,$args)
-    Safe-UIInvoke {
-        Disable-Controls $false
+    # create and start thread
+    $threadStart = {
         try {
-            $errorText = if ($args.Error) { $args.Error.ToString() } else { "<no args.Error>" }
-            $resultText = if ($args.Result) { $args.Result | Out-String } else { "<no args.Result>" }
-            $diag = "RunWorkerCompleted diagnostics:`r`n--- args.Error ---`r`n$errorText`r`n--- args.Result ---`r`n$resultText"
-            Write-Log $diag $global:currentLogFile
-            Write-Fatal $diag
-
-            if ($args.Error) {
-                $msg = "Deployment failed with exception:`r`n$($args.Error.Message)`r`n(Check logs for details)"
-                [System.Windows.Forms.MessageBox]::Show($msg,"Deployment error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
-                $stLabel.Text = "Error"
-            } elseif ($args.Result -and $args.Result.Success -eq $true) {
-                $stLabel.Text = "Completed"
-                $progressBar.Value = 0
-                [System.Windows.Forms.MessageBox]::Show("Deployment completed successfully.","Success",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information)
-            } else {
-                $reason = if ($args.Result) { $args.Result.Reason } else { "<no reason provided>" }
-                $err = if ($args.Result) { $args.Result.Error } else { "<no error provided>" }
-                $msg = "Deployment failed.`r`nReason: $reason`r`nError: $err`r`n(Check logs for diagnostic details.)"
-                [System.Windows.Forms.MessageBox]::Show($msg,"Deployment failed",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Warning)
-                $stLabel.Text = "Failed"
-            }
+            Deploy-WorkerCore
         } catch {
-            Write-Fatal "RunWorkerCompleted diagnostic handler exception: $($_.Exception.Message)"
-            [System.Windows.Forms.MessageBox]::Show("Diagnostic handler failed: $($_.Exception.Message)","Diagnostic error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error)
+            # ensure exception logged
+            Write-Log "Thread top-level exception: $($_.Exception.Message)" $global:currentLogFile
+            Write-Fatal "Thread top-level exception: $($_.Exception.Message)"
+            Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Deployment thread error: $($_.Exception.Message)","Thread error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
+            Safe-UIInvoke { $stLabel.Text = "Error"; Disable-Controls $false }
         }
     }
-}
 
-# detach previous handlers for progress/completed (safe for re-run in ISE)
-try { $bw.remove_ProgressChanged($null) } catch {}
-try { $bw.remove_RunWorkerCompleted($null) } catch {}
-
-# attach handlers
-$bw.add_ProgressChanged($progressHandler)
-$bw.add_RunWorkerCompleted($completedHandler)
-
-# Deploy button wiring (instrumented start)
-$deployButton.Add_Click({
-    if ($bw.IsBusy) { Write-Log "Deploy clicked but worker already busy." $global:currentLogFile; return }
-    $stopRequested = $false
-    Safe-UIInvoke { Disable-Controls $true; $stLabel.Text = "Queued..."; $progressBar.Value = 0 }
-    Write-Log "Deploy requested - starting BackgroundWorker." $null
-    try {
-        Write-Log "Before RunWorkerAsync()" $null
-        $bw.RunWorkerAsync()
-        Write-Log "After RunWorkerAsync()" $null
-    } catch {
-        Write-Fatal "RunWorkerAsync threw: $($_.Exception.Message)"
-        Write-Log "RunWorkerAsync threw: $($_.Exception.Message)" $null
-        Safe-UIInvoke { [System.Windows.Forms.MessageBox]::Show("Failed to start worker: $($_.Exception.Message)","Start error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
-        Disable-Controls $false
-    }
+    $thr = New-Object System.Threading.Thread([System.Threading.ThreadStart]$threadStart)
+    $global:deployThread = $thr
+    $thr.IsBackground = $true
+    $thr.Start()
 })
 
+# Stop button (cooperative)
 $stopButton.Add_Click({
-    if ($bw.IsBusy -and $bw.WorkerSupportsCancellation) {
+    if ($global:deployThread -and $global:deployThread.IsAlive) {
         $stopRequested = $true
-        $bw.CancelAsync()
-        Write-Log "Stop requested (BackgroundWorker)." $global:currentLogFile
+        Write-Log "Stop requested (cooperative)" $global:currentLogFile
+        Safe-UIInvoke { $stLabel.Text = "Stopping..." }
+        # deploy logic checks $stopRequested only at coarse points; not immediate abort
+    } else {
+        Write-Log "Stop clicked but no active thread" $global:currentLogFile
     }
 })
 
@@ -445,5 +389,4 @@ $closeButton.Add_Click({ $form.Close() })
 # show UI
 $form.Add_Shown({ $form.Activate() })
 $form.Topmost = $true
-
 try { [void]$form.ShowDialog() } catch { Write-Fatal "ShowDialog threw: $($_.Exception.Message)"; [System.Windows.Forms.MessageBox]::Show("UI failed: $($_.Exception.Message) - see $logRoot\logs for details","UI Error",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Error) }
