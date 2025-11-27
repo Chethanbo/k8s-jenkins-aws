@@ -1,7 +1,7 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# ---------------- Robust MessageBox wrapper ----------------
+# Robust MessageBox wrapper
 function Show-Dialog {
     param(
         [Parameter(Position=0)] [string] $Message = 'No message was provided.',
@@ -9,197 +9,178 @@ function Show-Dialog {
         [Parameter(Position=2)] [object] $Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
         [Parameter(Position=3)] [object] $Icon = [System.Windows.Forms.MessageBoxIcon]::None
     )
-
     if ([string]::IsNullOrWhiteSpace($Message)) { $Message = 'No message was provided.' }
-
-    function Convert-ToEnum {
-        param($value, [Type]$enumType, $fallback)
-        try {
-            if ($null -eq $value) { return $fallback }
-            if ($value -is $enumType) { return $value }
-            if ($value -is [int]) { return [Enum]::ToObject($enumType, $value) }
-            return [Enum]::Parse($enumType, $value.ToString(), $true)
-        } catch { return $fallback }
-    }
-
-    $btnEnum  = Convert-ToEnum $Buttons ([System.Windows.Forms.MessageBoxButtons]) [System.Windows.Forms.MessageBoxButtons]::OK
-    $iconEnum = Convert-ToEnum $Icon    ([System.Windows.Forms.MessageBoxIcon])    [System.Windows.Forms.MessageBoxIcon]::None
-
-    [System.Windows.Forms.MessageBox]::Show($Message, $Title, $btnEnum, $iconEnum) | Out-Null
+    function Convert-ToEnum { param($v,[Type]$t,$fb) try { if ($null -eq $v) { $fb } elseif ($v -is $t) { $v } elseif ($v -is [int]) { [Enum]::ToObject($t,$v) } else { [Enum]::Parse($t,$v.ToString(),$true) } } catch { $fb } }
+    $btn = Convert-ToEnum $Buttons ([System.Windows.Forms.MessageBoxButtons]) [System.Windows.Forms.MessageBoxButtons]::OK
+    $icon = Convert-ToEnum $Icon ([System.Windows.Forms.MessageBoxIcon]) [System.Windows.Forms.MessageBoxIcon]::None
+    [System.Windows.Forms.MessageBox]::Show($Message,$Title,$btn,$icon) | Out-Null
 }
 
-# Force TLS1.2 for Invoke-WebRequest
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# ---------------- Configuration (preserved logic) ----------------
+# Paths & preserved deployment config
 $LocalStylePath  = 'D:\Style'
 $LocalAppStyle   = 'D:\app\style'
 $TargetTempDir   = 'D:\Temp\deployments'
 $BaseSnapshotUrl = 'https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-snapshots-local/com/natwest/style'
 $BaseReleaseUrl  = 'https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-releases-local/com/natwest/style'
-
 function Ensure-Path { param($p) if (-not (Test-Path $p)) { New-Item -Path $p -ItemType Directory -Force | Out-Null } }
 
-# ---------------- Form (Modern Compact) ----------------
+# Main form
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Style Artifact Deployment Tool'   # OS window title
+$form.Text = 'Style Artifact Deployment Tool'
 $form.Size = [System.Drawing.Size]::new(980,640)
 $form.MinimumSize = [System.Drawing.Size]::new(880,520)
 $form.StartPosition = 'CenterScreen'
 $form.BackColor = [System.Drawing.Color]::FromArgb(250,250,250)
 $form.Font = New-Object System.Drawing.Font('Segoe UI',10)
 
-# Accent color
-$accent = [System.Drawing.Color]::FromArgb(37, 99, 235)  # blue-ish
+# Accent color used for buttons
+$accent = [System.Drawing.Color]::FromArgb(37,99,235)
 
-# Header
-$headerPanel = New-Object System.Windows.Forms.Panel
-$headerPanel.Height = 72
-$headerPanel.Dock = [System.Windows.Forms.DockStyle]::Top
-$headerPanel.BackColor = [System.Drawing.Color]::White
-$headerPanel.Padding = [System.Windows.Forms.Padding]::new(12)
-$form.Controls.Add($headerPanel)
+# Header (top)
+$header = New-Object System.Windows.Forms.Panel
+$header.Height = 72
+$header.Dock = [System.Windows.Forms.DockStyle]::Top
+$header.BackColor = [System.Drawing.Color]::White
+$header.Padding = [System.Windows.Forms.Padding]::new(12)
+$form.Controls.Add($header)
 
-$title = New-Object System.Windows.Forms.Label
-$title.Text = 'Style Artifact Deployment'
-$title.Font = New-Object System.Drawing.Font('Segoe UI',18,[System.Drawing.FontStyle]::Bold)
-$title.AutoSize = $false
-$title.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$title.Dock = [System.Windows.Forms.DockStyle]::Left
-$title.Width = 560
-$headerPanel.Controls.Add($title)
+$lblTitle = New-Object System.Windows.Forms.Label
+$lblTitle.Text = 'Style Artifact Deployment'
+$lblTitle.Font = New-Object System.Drawing.Font('Segoe UI',18,[System.Drawing.FontStyle]::Bold)
+$lblTitle.AutoSize = $false
+$lblTitle.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblTitle.Dock = [System.Windows.Forms.DockStyle]::Left
+$lblTitle.Width = 560
+$header.Controls.Add($lblTitle)
 
-$subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'Deploy JARs to local style folders - quick and safe'
-$subtitle.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Regular)
-$subtitle.AutoSize = $false
-$subtitle.TextAlign = [System.Drawing.ContentAlignment]::BottomLeft
-$subtitle.Dock = [System.Windows.Forms.DockStyle]::Fill
-$headerPanel.Controls.Add($subtitle)
+$lblSub = New-Object System.Windows.Forms.Label
+$lblSub.Text = 'Select component, choose service and enter version. Logs appear below.'
+$lblSub.Font = New-Object System.Drawing.Font('Segoe UI',9,[System.Drawing.FontStyle]::Regular)
+$lblSub.AutoSize = $false
+$lblSub.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$lblSub.Dock = [System.Windows.Forms.DockStyle]::Fill
+$header.Controls.Add($lblSub)
 
-# Main layout: two columns
-$mainPanel = New-Object System.Windows.Forms.Panel
-$mainPanel.Dock = [System.Windows.Forms.DockStyle]::Top
-$mainPanel.Height = 320
-$mainPanel.Padding = [System.Windows.Forms.Padding]::new(12)
-$form.Controls.Add($mainPanel)
+# Main content: inputs (left) and status (right)
+$main = New-Object System.Windows.Forms.Panel
+$main.Dock = [System.Windows.Forms.DockStyle]::Top
+$main.Height = 200
+$main.Padding = [System.Windows.Forms.Padding]::new(12)
+$form.Controls.Add($main)
 
-# Left: inputs (use TableLayoutPanel)
-$leftPanel = New-Object System.Windows.Forms.Panel
-$leftPanel.Width = 560
-$leftPanel.Dock = [System.Windows.Forms.DockStyle]::Left
-$mainPanel.Controls.Add($leftPanel)
+# Left inputs container (TableLayoutPanel)
+$left = New-Object System.Windows.Forms.Panel
+$left.Width = 560
+$left.Dock = [System.Windows.Forms.DockStyle]::Left
+$main.Controls.Add($left)
 
 $table = New-Object System.Windows.Forms.TableLayoutPanel
 $table.Dock = [System.Windows.Forms.DockStyle]::Fill
 $table.ColumnCount = 2
-$table.RowCount = 5
-$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute',180)))
+$table.RowCount = 4
+$table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute',190)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',100)))
 $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',44)))
 $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',44)))
 $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',44)))
-$table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',40)))
 $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Percent',100)))
-$leftPanel.Controls.Add($table)
+$left.Controls.Add($table)
 
-function New-Label($text) {
-    $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = $text
-    $lbl.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $lbl.Dock = [System.Windows.Forms.DockStyle]::Fill
-    $lbl.Padding = [System.Windows.Forms.Padding]::new(6,0,6,0)
-    return $lbl
+function MakeLabel($text) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $text
+    $l.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $l.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $l.Margin = [System.Windows.Forms.Padding]::new(6,0,6,0)
+    return $l
 }
 
-# Deployment Component
-$table.Controls.Add((New-Label 'Deployment Component'), 0, 0)
+# Component label & combo
+$table.Controls.Add((MakeLabel 'Deployment Component'),0,0)
 $componentBox = New-Object System.Windows.Forms.ComboBox
 $componentBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $componentBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $componentBox.Items.AddRange(@('style','style-ms'))
-$table.Controls.Add($componentBox, 1, 0)
+$componentBox.Margin = [System.Windows.Forms.Padding]::new(6,8,6,8)
+$componentBox.DropDownWidth = 420
+$table.Controls.Add($componentBox,1,0)
 
-# Service Name
-$table.Controls.Add((New-Label 'Service Name'), 0, 1)
+# Service label & combo
+$table.Controls.Add((MakeLabel 'Service Name'),0,1)
 $serviceBox = New-Object System.Windows.Forms.ComboBox
 $serviceBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $serviceBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-$table.Controls.Add($serviceBox, 1, 1)
+$serviceBox.Margin = [System.Windows.Forms.Padding]::new(6,8,6,8)
+$serviceBox.DropDownWidth = 420
+$table.Controls.Add($serviceBox,1,1)
 
-# Artifact Version
-$table.Controls.Add((New-Label 'Artifact Version'), 0, 2)
+# Version label & text box
+$table.Controls.Add((MakeLabel 'Artifact Version'),0,2)
 $versionHint = 'e.g. 1.2.3 or 1.2.3-SNAPSHOT'
 $versionBox = New-Object System.Windows.Forms.TextBox
 $versionBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $versionBox.Text = $versionHint
 $versionBox.ForeColor = [System.Drawing.Color]::Gray
+$versionBox.Margin = [System.Windows.Forms.Padding]::new(6,8,6,8)
 $versionBox.Add_Enter({ if ($versionBox.Text -eq $versionHint) { $versionBox.Text=''; $versionBox.ForeColor = [System.Drawing.Color]::Black } })
 $versionBox.Add_Leave({ if ([string]::IsNullOrWhiteSpace($versionBox.Text)) { $versionBox.Text = $versionHint; $versionBox.ForeColor = [System.Drawing.Color]::Gray } })
-$table.Controls.Add($versionBox, 1, 2)
+$table.Controls.Add($versionBox,1,2)
 
-# Small help label
-$helpLabel = New-Object System.Windows.Forms.Label
-$helpLabel.Text = 'Select component, choose a service and enter version. Logs appear below.'
-$helpLabel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$helpLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
-$helpLabel.Padding = [System.Windows.Forms.Padding]::new(6,6,6,6)
-$table.Controls.Add($helpLabel, 0, 3)
-$table.SetColumnSpan($helpLabel, 2)
+# small spacer row keeps layout tidy
+$spacer = New-Object System.Windows.Forms.Panel
+$spacer.Dock = [System.Windows.Forms.DockStyle]::Fill
+$table.Controls.Add($spacer,0,3)
+$table.SetColumnSpan($spacer,2)
 
-# Spacer (left column bottom area)
-$spacerPanel = New-Object System.Windows.Forms.Panel
-$spacerPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$table.Controls.Add($spacerPanel, 0, 4)
-$table.SetColumnSpan($spacerPanel, 2)
-
-# Right: status card
-$rightPanel = New-Object System.Windows.Forms.Panel
-$rightPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$rightPanel.Padding = [System.Windows.Forms.Padding]::new(12)
-$mainPanel.Controls.Add($rightPanel)
+# Right status card (compact)
+$right = New-Object System.Windows.Forms.Panel
+$right.Dock = [System.Windows.Forms.DockStyle]::Fill
+$right.Padding = [System.Windows.Forms.Padding]::new(12)
+$main.Controls.Add($right)
 
 $statusCard = New-Object System.Windows.Forms.Panel
 $statusCard.BackColor = [System.Drawing.Color]::White
 $statusCard.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 $statusCard.Dock = [System.Windows.Forms.DockStyle]::Top
-$statusCard.Height = 200
-$statusCard.Padding = [System.Windows.Forms.Padding]::new(12)
-$rightPanel.Controls.Add($statusCard)
+$statusCard.Height = 180
+$statusCard.Padding = [System.Windows.Forms.Padding]::new(10)
+$right.Controls.Add($statusCard)
 
-$statusTitle = New-Object System.Windows.Forms.Label
-$statusTitle.Text = 'Status'
-$statusTitle.Font = New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
-$statusTitle.Dock = [System.Windows.Forms.DockStyle]::Top
-$statusCard.Controls.Add($statusTitle)
+$stTitle = New-Object System.Windows.Forms.Label
+$stTitle.Text = 'Status'
+$stTitle.Font = New-Object System.Drawing.Font('Segoe UI',12,[System.Drawing.FontStyle]::Bold)
+$stTitle.Dock = [System.Windows.Forms.DockStyle]::Top
+$statusCard.Controls.Add($stTitle)
 
-$infoPanel = New-Object System.Windows.Forms.TableLayoutPanel
-$infoPanel.Dock = [System.Windows.Forms.DockStyle]::Top
-$infoPanel.ColumnCount = 2
-$infoPanel.RowCount = 3
-$infoPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute',110)))
-$infoPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',100)))
-$infoPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
-$infoPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
-$infoPanel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
-$statusCard.Controls.Add($infoPanel)
+$info = New-Object System.Windows.Forms.TableLayoutPanel
+$info.Dock = [System.Windows.Forms.DockStyle]::Top
+$info.ColumnCount = 2
+$info.RowCount = 3
+$info.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Absolute',110)))
+$info.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',100)))
+$info.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
+$info.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
+$info.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',28)))
+$statusCard.Controls.Add($info)
 
-$lblSelComp = New-Object System.Windows.Forms.Label; $lblSelComp.Text='Component:'; $lblSelComp.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
-$lblSelSvc  = New-Object System.Windows.Forms.Label; $lblSelSvc.Text='Service:';   $lblSelSvc.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
-$lblSelVer  = New-Object System.Windows.Forms.Label; $lblSelVer.Text='Version:';   $lblSelVer.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
-$valComp = New-Object System.Windows.Forms.Label; $valComp.Text='—'; $valComp.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
-$valSvc  = New-Object System.Windows.Forms.Label; $valSvc.Text='—';  $valSvc.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
-$valVer  = New-Object System.Windows.Forms.Label; $valVer.Text='—';  $valVer.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$lbl1 = New-Object System.Windows.Forms.Label; $lbl1.Text='Component:'; $lbl1.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$lbl2 = New-Object System.Windows.Forms.Label; $lbl2.Text='Service:';    $lbl2.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$lbl3 = New-Object System.Windows.Forms.Label; $lbl3.Text='Version:';    $lbl3.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$val1 = New-Object System.Windows.Forms.Label; $val1.Text='—'; $val1.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$val2 = New-Object System.Windows.Forms.Label; $val2.Text='—'; $val2.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
+$val3 = New-Object System.Windows.Forms.Label; $val3.Text='—'; $val3.TextAlign=[System.Drawing.ContentAlignment]::MiddleLeft
 
-$infoPanel.Controls.Add($lblSelComp,0,0); $infoPanel.Controls.Add($valComp,1,0)
-$infoPanel.Controls.Add($lblSelSvc,0,1);  $infoPanel.Controls.Add($valSvc,1,1)
-$infoPanel.Controls.Add($lblSelVer,0,2);  $infoPanel.Controls.Add($valVer,1,2)
+$info.Controls.Add($lbl1,0,0); $info.Controls.Add($val1,1,0)
+$info.Controls.Add($lbl2,0,1); $info.Controls.Add($val2,1,1)
+$info.Controls.Add($lbl3,0,2); $info.Controls.Add($val3,1,2)
 
-# Progress + percent
-$progressArea = New-Object System.Windows.Forms.Panel
-$progressArea.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$progressArea.Height = 60
-$statusCard.Controls.Add($progressArea)
+# Progress and percent label
+$progPanel = New-Object System.Windows.Forms.Panel
+$progPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$progPanel.Height = 56
+$statusCard.Controls.Add($progPanel)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
@@ -208,199 +189,118 @@ $progressBar.Width = 340
 $progressBar.Height = 18
 $progressBar.Left = 6
 $progressBar.Top = 8
-$progressArea.Controls.Add($progressBar)
+$progPanel.Controls.Add($progressBar)
 
 $percentLabel = New-Object System.Windows.Forms.Label
 $percentLabel.Text = '0%'
 $percentLabel.Left = $progressBar.Right + 12
 $percentLabel.Top = $progressBar.Top - 2
 $percentLabel.AutoSize = $true
-$progressArea.Controls.Add($percentLabel)
+$progPanel.Controls.Add($percentLabel)
 
-# Last deploy + small history
-$historyTitle = New-Object System.Windows.Forms.Label
-$historyTitle.Text = 'Last Deploy'
-$historyTitle.Font = New-Object System.Drawing.Font('Segoe UI',10,[System.Drawing.FontStyle]::Bold)
-$historyTitle.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$statusCard.Controls.Add($historyTitle)
-
-$historyBox = New-Object System.Windows.Forms.TextBox
-$historyBox.Multiline = $true
-$historyBox.ReadOnly = $true
-$historyBox.Height = 60
-$historyBox.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$statusCard.Controls.Add($historyBox)
-
-# Toggle log button
-$toggleLogBtn = New-Object System.Windows.Forms.Button
-$toggleLogBtn.Text = 'Hide Log'
-$toggleLogBtn.Width = 96
-$toggleLogBtn.Height = 32
-$toggleLogBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::System
-$toggleLogBtn.BackColor = $accent
-$toggleLogBtn.ForeColor = [System.Drawing.Color]::White
-$toggleLogBtn.Top = $statusCard.Bottom + 8
-$rightPanel.Controls.Add($toggleLogBtn)
-
-# Bottom area: collapsible log panel
+# Log panel below everything (full-width)
 $logPanel = New-Object System.Windows.Forms.Panel
 $logPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logPanel.Padding = [System.Windows.Forms.Padding]::new(12)
 $form.Controls.Add($logPanel)
 
-$logBoxMain = New-Object System.Windows.Forms.TextBox
-$logBoxMain.Multiline = $true
-$logBoxMain.ScrollBars = 'Vertical'
-$logBoxMain.ReadOnly = $true
-$logBoxMain.Dock = [System.Windows.Forms.DockStyle]::Fill
-$logPanel.Controls.Add($logBoxMain)
+$logBox = New-Object System.Windows.Forms.TextBox
+$logBox.Multiline = $true
+$logBox.ScrollBars = 'Vertical'
+$logBox.ReadOnly = $true
+$logBox.Dock = [System.Windows.Forms.DockStyle]::Fill
+$logPanel.Controls.Add($logBox)
 
-# Buttons panel at bottom (always visible)
-$buttonsPanel = New-Object System.Windows.Forms.Panel
-$buttonsPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
-$buttonsPanel.Height = 64
-$buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(12)
-$buttonsPanel.BackColor = [System.Drawing.Color]::FromArgb(245,245,245)
-$form.Controls.Add($buttonsPanel)
+# Buttons panel (fixed bottom)
+$buttons = New-Object System.Windows.Forms.Panel
+$buttons.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$buttons.Height = 64
+$buttons.Padding = [System.Windows.Forms.Padding]::new(12)
+$buttons.BackColor = [System.Drawing.Color]::FromArgb(245,245,245)
+$form.Controls.Add($buttons)
 
-# Deploy / Open Logs buttons
-$openLogsBtn = New-Object System.Windows.Forms.Button
-$openLogsBtn.Text = 'Open Logs'
-$openLogsBtn.Width = 120
-$openLogsBtn.Height = 40
-$openLogsBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::System
-$buttonsPanel.Controls.Add($openLogsBtn)
+$openBtn = New-Object System.Windows.Forms.Button
+$openBtn.Text = 'Open Logs'
+$openBtn.Width = 120
+$openBtn.Height = 40
+$openBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::System
+$buttons.Controls.Add($openBtn)
 
 $deployBtn = New-Object System.Windows.Forms.Button
 $deployBtn.Text = 'Deploy'
 $deployBtn.Width = 140
 $deployBtn.Height = 44
-$deployBtn.FlatStyle = [System.Windows.Forms.FlatStyle]::Standard
 $deployBtn.Font = New-Object System.Drawing.Font('Segoe UI',11,[System.Drawing.FontStyle]::Bold)
 $deployBtn.BackColor = $accent
 $deployBtn.ForeColor = [System.Drawing.Color]::White
 $deployBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Right
-$deployBtn.Left = $buttonsPanel.ClientSize.Width - $deployBtn.Width - 12
-$deployBtn.Top  = [int](($buttonsPanel.ClientSize.Height - $deployBtn.Height)/2)
-$buttonsPanel.Controls.Add($deployBtn)
+$deployBtn.Left = $buttons.ClientSize.Width - $deployBtn.Width - 12
+$deployBtn.Top = [int](($buttons.ClientSize.Height - $deployBtn.Height)/2)
+$buttons.Controls.Add($deployBtn)
 
-$buttonsPanel.Add_Resize({
-    try {
-        $deployBtn.Left = $buttonsPanel.ClientSize.Width - $deployBtn.Width - 12
-        $deployBtn.Top  = [int](($buttonsPanel.ClientSize.Height - $deployBtn.Height)/2)
-    } catch {}
-})
+# reposition deploy button on resize
+$buttons.Add_Resize({ try { $deployBtn.Left = $buttons.ClientSize.Width - $deployBtn.Width - 12; $deployBtn.Top = [int](($buttons.ClientSize.Height - $deployBtn.Height)/2) } catch {} })
 
-# ---------------- Logging helpers (UI-safe) ----------------
-function Append-UiLog {
-    param([string]$message)
-    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    $entry = "[$ts] $message`r`n"
-    if ($logBoxMain.InvokeRequired) {
-        $logBoxMain.Invoke([Action]{ $logBoxMain.AppendText($entry) }) | Out-Null
-    } else {
-        $logBoxMain.AppendText($entry)
-    }
-}
+# UI helpers
+function Append-UiLog { param($m) $ts=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); $entry="[$ts] $m`r`n"; if ($logBox.InvokeRequired) { $logBox.Invoke([Action]{ $logBox.AppendText($entry) }) } else { $logBox.AppendText($entry) } }
+function Update-Status { param($c,$s,$v) try { $val1.Text = $c; $val2.Text = $s; $val3.Text = $v } catch {} }
 
-function Update-StatusCard {
-    param($comp,$svc,$ver)
-    try {
-        $valComp.Text = $comp
-        $valSvc.Text  = $svc
-        $valVer.Text  = $ver
-        $today = (Get-Date).ToString('yyyy-MM-dd')
-        $folder = Join-Path (Join-Path $TargetTempDir 'logs') $today
-        if (Test-Path $folder) {
-            $latest = Get-ChildItem -Path $folder -Filter '*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($latest) {
-                $historyBox.Text = ('Last: ' + $latest.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $latest.Name)
-            } else {
-                $historyBox.Text = 'No deploy logs for today.'
-            }
-        } else {
-            $historyBox.Text = 'No deploy logs for today.'
-        }
-    } catch {
-        $historyBox.Text = 'History unavailable.'
-    }
-}
-
-# ---------------- Populate service list when component changes ----------------
+# Populate services when component changed
 $componentBox.Add_SelectedIndexChanged({
     $serviceBox.Items.Clear()
     $path = if ($componentBox.SelectedItem -eq 'style') { $LocalStylePath } else { $LocalAppStyle }
     if (Test-Path $path) {
-        Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            $serviceBox.Items.Add($_.Name) | Out-Null
-        }
+        Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | ForEach-Object { $serviceBox.Items.Add($_.Name) | Out-Null }
     }
     if ($serviceBox.Items.Count -gt 0) { $serviceBox.SelectedIndex = 0 }
 })
 $componentBox.SelectedIndex = 0
 
-# Update status card when selections change
-$serviceBox.Add_SelectedIndexChanged({ Update-StatusCard $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
-$componentBox.Add_SelectedIndexChanged({ Update-StatusCard $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
-$versionBox.Add_Leave({ Update-StatusCard $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
+# Update status card when selection changes
+$serviceBox.Add_SelectedIndexChanged({ Update-Status $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
+$componentBox.Add_SelectedIndexChanged({ Update-Status $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
+$versionBox.Add_Leave({ Update-Status $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text })
 
-# Toggle log visibility
-$toggleLogBtn.Add_Click({
-    if ($logPanel.Visible) {
-        $logPanel.Visible = $false
-        $toggleLogBtn.Text = 'Show Log'
-    } else {
-        $logPanel.Visible = $true
-        $toggleLogBtn.Text = 'Hide Log'
-    }
+# Buttons actions (preserve deploy logic)
+$openBtn.Add_Click({
+    $folder = Join-Path (Join-Path $TargetTempDir 'logs') (Get-Date -Format 'yyyy-MM-dd')
+    Ensure-Path $folder
+    Start-Process explorer.exe $folder
 })
 
-# ---------------- Deployment (synchronous, preserved logic) ----------------
 $deployBtn.Add_Click({
     try {
         $component = $componentBox.SelectedItem
         $artifact  = $serviceBox.SelectedItem
         $version   = $versionBox.Text.Trim()
         if ($version -eq $versionHint) { $version = '' }
-
         if (-not ($component -and $artifact -and $version)) {
             Show-Dialog 'Please fill all fields.' 'Validation Error' [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Warning
             return
         }
-
-        $targetDir   = $TargetTempDir
-        $logDir      = Join-Path $targetDir 'logs'
-        $dateFolder  = Join-Path $logDir (Get-Date -Format 'yyyy-MM-dd')
+        $targetDir = $TargetTempDir; $logDir = Join-Path $targetDir 'logs'; $dateFolder = Join-Path $logDir (Get-Date -Format 'yyyy-MM-dd')
         Ensure-Path $targetDir; Ensure-Path $logDir; Ensure-Path $dateFolder
         $logFile = Join-Path $dateFolder ($artifact + '-' + $version + '.log')
 
-        Append-UiLog 'Starting deployment...'
-        Append-UiLog ('Component: ' + $component + ', Service: ' + $artifact + ', Version: ' + $version)
-        Update-StatusCard $component $artifact ($version)
+        Append-UiLog ('Starting deployment: ' + $component + '/' + $artifact + '/' + $version)
+        Update-Status $component $artifact $version
 
         $isSnapshot = $version -like '*SNAPSHOT*'
-        if ($isSnapshot) {
-            $url = $BaseSnapshotUrl + '/' + $artifact + '/' + $version + '/' + $artifact + '-' + $version + '.jar'
-        } else {
-            $url = $BaseReleaseUrl + '/' + $artifact + '/' + $version + '/' + $artifact + '-' + $version + '.jar'
-        }
+        if ($isSnapshot) { $url = $BaseSnapshotUrl + '/' + $artifact + '/' + $version + '/' + $artifact + '-' + $version + '.jar' }
+        else { $url = $BaseReleaseUrl + '/' + $artifact + '/' + $version + '/' + $artifact + '-' + $version + '.jar' }
 
         Append-UiLog ('Constructed URL: ' + $url)
-        $progressBar.Value = 10
-        $percentLabel.Text = '10%'
+        $progressBar.Value = 10; $percentLabel.Text = '10%'
 
         $artifactPath = Join-Path $targetDir ($artifact + '-' + $version + '.jar')
-
         try {
             Invoke-WebRequest -Uri $url -OutFile $artifactPath -UseBasicParsing -ErrorAction Stop
             Append-UiLog ('Downloaded artifact to ' + $artifactPath)
-            $progressBar.Value = 50
-            $percentLabel.Text = '50%'
+            $progressBar.Value = 50; $percentLabel.Text = '50%'
         } catch {
             Append-UiLog ('Download failed: ' + $_.Exception.Message)
             Add-Content -Path $logFile -Value ('[' + (Get-Date) + '] Download failed: ' + $_.Exception.Message)
             Show-Dialog ('Download failed: ' + $_.Exception.Message) 'Error' [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Error
-            Update-StatusCard $component $artifact $version
             return
         }
 
@@ -411,44 +311,30 @@ $deployBtn.Add_Click({
             Append-UiLog ('Deployment folder not found: ' + $deployPath)
             Add-Content -Path $logFile -Value ('[' + (Get-Date) + '] Deployment folder not found: ' + $deployPath)
             Show-Dialog ('Deployment folder not found: ' + $deployPath) 'Error' [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Error
-            Update-StatusCard $component $artifact $version
             return
         }
 
         $existingJar = Join-Path $deployPath ($artifact + '.jar')
-        if (Test-Path $existingJar) {
-            Remove-Item $existingJar -Force
-            Append-UiLog ('Removed existing jar: ' + $existingJar)
-        } else {
-            Append-UiLog 'No existing jar to remove.'
-        }
+        if (Test-Path $existingJar) { Remove-Item $existingJar -Force; Append-UiLog ('Removed existing jar: ' + $existingJar) }
+        else { Append-UiLog 'No existing jar to remove.' }
 
         Copy-Item -Path $artifactPath -Destination $existingJar -Force
         Append-UiLog ('Copied new artifact to ' + $existingJar)
-        $progressBar.Value = 100
-        $percentLabel.Text = '100%'
+        $progressBar.Value = 100; $percentLabel.Text = '100%'
 
         Add-Content -Path $logFile -Value ('[' + (Get-Date) + '] Deployment completed successfully.')
         Append-UiLog 'Deployment completed successfully.'
-        Update-StatusCard $component $artifact $version
+        Update-Status $component $artifact $version
         Show-Dialog 'Deployment completed successfully.' 'Success' [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Information
 
     } catch {
         Append-UiLog ('Unhandled error: ' + $_.Exception.Message)
         Show-Dialog ('Unhandled error: ' + $_.Exception.Message) 'Error' [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Error
-        Update-StatusCard $component $artifact $version
     }
 })
 
-# Open logs button
-$openLogsBtn.Add_Click({
-    $folder = Join-Path (Join-Path $TargetTempDir 'logs') (Get-Date -Format 'yyyy-MM-dd')
-    Ensure-Path $folder
-    Start-Process explorer.exe $folder
-})
-
-# Initialize UI values
-Update-StatusCard $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text
+# Initialize status values
+Update-Status $componentBox.SelectedItem $serviceBox.SelectedItem $versionBox.Text
 
 # Show form
 $form.Topmost = $true
