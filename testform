@@ -2,27 +2,42 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 # ============================================================
-# ROBUST MESSAGEBOX WRAPPER (fixes ALL enum / overload issues)
+# SUPER-ROBUST MESSAGEBOX WRAPPER
+# - accepts strings/enums/numbers for Buttons/Icon
+# - substitutes a fallback if Message is empty/null
+# - safe inside event handlers / PowerShell 5
 # ============================================================
 function Show-Dialog {
     param(
-        [Parameter(Mandatory=$true, Position=0)] [string] $Message,
-        [Parameter(Mandatory=$false, Position=1)] [string] $Title = "",
-        [Parameter(Mandatory=$false, Position=2)] [object] $Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
-        [Parameter(Mandatory=$false, Position=3)] [object] $Icon = [System.Windows.Forms.MessageBoxIcon]::None
+        [Parameter(Mandatory=$false, Position=0)]
+        [string] $Message,
+
+        [Parameter(Mandatory=$false, Position=1)]
+        [string] $Title = "",
+
+        [Parameter(Mandatory=$false, Position=2)]
+        [object] $Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
+
+        [Parameter(Mandatory=$false, Position=3)]
+        [object] $Icon = [System.Windows.Forms.MessageBoxIcon]::None
     )
+
+    # If empty or null message, substitute a readable fallback
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = "No message was provided."
+    }
 
     function Convert-ToEnum {
         param($value, [Type]$enumType, $fallback)
 
         try {
+            if ($null -eq $value) { return $fallback }
             if ($value -is $enumType) { return $value }
             if ($value -is [int]) { return [Enum]::ToObject($enumType, $value) }
-            if ($null -ne $value) {
-                return [Enum]::Parse($enumType, $value.ToString(), $true)
-            }
-        } catch {}
-        return $fallback
+            return [Enum]::Parse($enumType, $value.ToString(), $true)
+        } catch {
+            return $fallback
+        }
     }
 
     $btnEnum  = Convert-ToEnum $Buttons ([System.Windows.Forms.MessageBoxButtons]) [System.Windows.Forms.MessageBoxButtons]::OK
@@ -256,9 +271,11 @@ $bw.add_ProgressChanged({
 $bw.add_RunWorkerCompleted({
     param($s,$e)
 
-    if (-not $e.Result.Success) {
-        Log "Deployment failed: $($e.Result.Message)"
-        Show-Dialog $e.Result.Message "Deployment Failed" ([System.Windows.Forms.MessageBoxButtons]::OK) ([System.Windows.Forms.MessageBoxIcon]::Error)
+    if ($null -eq $e.Result -or -not $e.Result.Success) {
+        $msg = ""
+        try { $msg = $e.Result.Message } catch {}
+        Log "Deployment failed: $msg"
+        Show-Dialog $msg "Deployment Failed" ([System.Windows.Forms.MessageBoxButtons]::OK) ([System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
 
