@@ -1,15 +1,34 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Safe MessageBox wrapper (avoids overload / enum binding issues)
+# ============================================================
+# ROBUST MESSAGEBOX WRAPPER (fixes ALL enum / overload issues)
+# ============================================================
 function Show-Dialog {
     param(
-        [string]$Message,
-        [string]$Title = "",
-        [System.Windows.Forms.MessageBoxButtons]$Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]$Icon = [System.Windows.Forms.MessageBoxIcon]::None
+        [Parameter(Mandatory=$true, Position=0)] [string] $Message,
+        [Parameter(Mandatory=$false, Position=1)] [string] $Title = "",
+        [Parameter(Mandatory=$false, Position=2)] [object] $Buttons = [System.Windows.Forms.MessageBoxButtons]::OK,
+        [Parameter(Mandatory=$false, Position=3)] [object] $Icon = [System.Windows.Forms.MessageBoxIcon]::None
     )
-    [System.Windows.Forms.MessageBox]::Show($Message, $Title, $Buttons, $Icon) | Out-Null
+
+    function Convert-ToEnum {
+        param($value, [Type]$enumType, $fallback)
+
+        try {
+            if ($value -is $enumType) { return $value }
+            if ($value -is [int]) { return [Enum]::ToObject($enumType, $value) }
+            if ($null -ne $value) {
+                return [Enum]::Parse($enumType, $value.ToString(), $true)
+            }
+        } catch {}
+        return $fallback
+    }
+
+    $btnEnum  = Convert-ToEnum $Buttons ([System.Windows.Forms.MessageBoxButtons]) [System.Windows.Forms.MessageBoxButtons]::OK
+    $iconEnum = Convert-ToEnum $Icon    ([System.Windows.Forms.MessageBoxIcon])    [System.Windows.Forms.MessageBoxIcon]::None
+
+    [System.Windows.Forms.MessageBox]::Show($Message, $Title, $btnEnum, $iconEnum) | Out-Null
 }
 
 # Force TLS1.2 for Invoke-WebRequest
@@ -100,8 +119,8 @@ $componentBox.Add_SelectedIndexChanged({
     $path = if ($componentBox.SelectedItem -eq "style") { $LocalStylePath } else { $LocalAppStyle }
 
     if (Test-Path $path) {
-        Get-ChildItem $path -Directory | ForEach-Object { 
-            $serviceBox.Items.Add($_.Name) | Out-Null 
+        Get-ChildItem $path -Directory | ForEach-Object {
+            $serviceBox.Items.Add($_.Name) | Out-Null
         }
     }
 
@@ -172,7 +191,7 @@ function Log {
 }
 
 # ============================================================
-# BACKGROUND WORKER (FULLY FIXED)
+# BACKGROUND WORKER
 # ============================================================
 $bw = New-Object System.ComponentModel.BackgroundWorker
 $bw.WorkerReportsProgress = $true
@@ -181,7 +200,7 @@ $bw.WorkerReportsProgress = $true
 $bw.add_DoWork({
     param($sender,$e)
 
-    $p = $e.Argument   # This is now the PSObject we passed
+    $p = $e.Argument
 
     try {
         $sender.ReportProgress(10)
@@ -239,12 +258,12 @@ $bw.add_RunWorkerCompleted({
 
     if (-not $e.Result.Success) {
         Log "Deployment failed: $($e.Result.Message)"
-        Show-Dialog $e.Result.Message "Deployment Failed" [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Error
+        Show-Dialog $e.Result.Message "Deployment Failed" ([System.Windows.Forms.MessageBoxButtons]::OK) ([System.Windows.Forms.MessageBoxIcon]::Error)
         return
     }
 
     Log "Deployment completed successfully."
-    Show-Dialog "Deployment completed successfully." "Success" [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Information
+    Show-Dialog "Deployment completed successfully." "Success" ([System.Windows.Forms.MessageBoxButtons]::OK) ([System.Windows.Forms.MessageBoxIcon]::Information)
 })
 
 # ============================================================
@@ -259,7 +278,7 @@ $deployButton.Add_Click({
     if ($version -eq $versionHint) { $version = "" }
 
     if (-not ($component -and $artifact -and $version)) {
-        Show-Dialog "Please fill all fields." "Validation Error" [System.Windows.Forms.MessageBoxButtons]::OK [System.Windows.Forms.MessageBoxIcon]::Warning
+        Show-Dialog "Please fill all fields." "Validation Error" ([System.Windows.Forms.MessageBoxButtons]::OK) ([System.Windows.Forms.MessageBoxIcon]::Warning)
         return
     }
 
@@ -272,7 +291,6 @@ $deployButton.Add_Click({
     $progressBar.Value = 0
     $logBox.Clear()
 
-    # THIS IS THE CRITICAL FIX
     $argsObject = New-Object PSObject -Property @{
         Component = $component
         Artifact  = $artifact
