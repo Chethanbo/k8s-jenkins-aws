@@ -231,8 +231,8 @@ $bw.add_RunWorkerCompleted({
         [System.Windows.Forms.MessageBox]::Show(
             $e.Result.Message,
             "Deployment Failed",
-            "OK",
-            "Error"
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
         )
         return
     }
@@ -241,8 +241,8 @@ $bw.add_RunWorkerCompleted({
     [System.Windows.Forms.MessageBox]::Show(
         "Deployment completed successfully.",
         "Success",
-        "OK",
-        "Information"
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information
     )
 })
 
