@@ -21,7 +21,7 @@ function Ensure-Path {
 
 # ---------------- Build UI ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "🔧  STYLE ARTIFACT DEPLOYMENT TOOL  🔧"   # OS window bar title (kept)
+$form.Text = "🔧  STYLE ARTIFACT DEPLOYMENT TOOL  🔧"
 $form.Size = [System.Drawing.Size]::new(980, 680)
 $form.MinimumSize = [System.Drawing.Size]::new(760, 480)
 $form.StartPosition = "CenterScreen"
@@ -31,7 +31,7 @@ $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 $fontMain = New-Object System.Drawing.Font("Segoe UI",10)
 $form.Font = $fontMain
 
-# Bottom panel (will contain status area on top and buttons below)
+# Bottom panel (status + buttons)
 $bottomPanel = New-Object System.Windows.Forms.Panel
 $bottomPanel.Height = 360
 $bottomPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
@@ -39,7 +39,7 @@ $bottomPanel.Padding = [System.Windows.Forms.Padding]::new(8)
 $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(250,250,250)
 $form.Controls.Add($bottomPanel)
 
-# Create status area inside bottomPanel (progress + logs) — dock top of bottomPanel
+# Create status area inside bottomPanel (progress + logs)
 $statusArea = New-Object System.Windows.Forms.Panel
 $statusArea.Height = 300
 $statusArea.Dock = [System.Windows.Forms.DockStyle]::Top
@@ -53,7 +53,7 @@ $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.Padding = [System.Windows.Forms.Padding]::new(8)
 $form.Controls.Add($contentPanel)
 
-# ---------------- Table for labels/inputs at top of contentPanel ----------------
+# ---------------- Inputs table ----------------
 $table = New-Object System.Windows.Forms.TableLayoutPanel
 $table.Dock = [System.Windows.Forms.DockStyle]::Top
 $table.AutoSize = $true
@@ -66,8 +66,6 @@ $labelColumnWidth = 300
 $table.ColumnStyles.Clear()
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, $labelColumnWidth)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-
-$table.RowStyles.Clear()
 for ($r = 0; $r -lt $table.RowCount; $r++) {
     $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
 }
@@ -85,10 +83,9 @@ function New-RightLabel($text) {
     return $lbl
 }
 
-# Row0 - Component
+# Component
 $lblComponent = New-RightLabel "Deployment Component"
 $table.Controls.Add($lblComponent, 0, 0)
-
 $componentBox = New-Object System.Windows.Forms.ComboBox
 $componentBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $componentBox.Items.AddRange(@("style","style-ms"))
@@ -98,10 +95,9 @@ $componentBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $componentBox.Font = $fontMain
 $table.Controls.Add($componentBox, 1, 0)
 
-# Row1 - Service
+# Service
 $lblService = New-RightLabel "Service Name"
 $table.Controls.Add($lblService, 0, 1)
-
 $serviceBox = New-Object System.Windows.Forms.ComboBox
 $serviceBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $serviceBox.Dock = [System.Windows.Forms.DockStyle]::Fill
@@ -109,10 +105,9 @@ $serviceBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $serviceBox.Font = $fontMain
 $table.Controls.Add($serviceBox, 1, 1)
 
-# Row2 - Version with hint
+# Version
 $lblVersion = New-RightLabel "Artifact Version"
 $table.Controls.Add($lblVersion, 0, 2)
-
 $versionHint = "e.g. 1.2.3 or 1.2.3-SNAPSHOT"
 $versionBox = New-Object System.Windows.Forms.TextBox
 $versionBox.Text = $versionHint
@@ -120,43 +115,33 @@ $versionBox.ForeColor = [System.Drawing.Color]::Gray
 $versionBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $versionBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $versionBox.Font = $fontMain
-$versionBox.Add_Enter({
-    if ($versionBox.Text -eq $versionHint) { $versionBox.Text = ""; $versionBox.ForeColor = [System.Drawing.Color]::Black }
-})
-$versionBox.Add_Leave({
-    if ([string]::IsNullOrWhiteSpace($versionBox.Text)) { $versionBox.Text = $versionHint; $versionBox.ForeColor = [System.Drawing.Color]::Gray }
-})
+$versionBox.Add_Enter({ if ($versionBox.Text -eq $versionHint) { $versionBox.Text = ""; $versionBox.ForeColor = [System.Drawing.Color]::Black } })
+$versionBox.Add_Leave({ if ([string]::IsNullOrWhiteSpace($versionBox.Text)) { $versionBox.Text = $versionHint; $versionBox.ForeColor = [System.Drawing.Color]::Gray } })
 $table.Controls.Add($versionBox, 1, 2)
 
-# Put a small spacer under inputs instead of a huge filler
+# small spacer + flexible filler
 $spacer = New-Object System.Windows.Forms.Panel
 $spacer.Height = 12
 $spacer.Dock = [System.Windows.Forms.DockStyle]::Top
 $contentPanel.Controls.Add($spacer)
-
-# Keep a small flexible filler so contentPanel doesn't create a huge top gap
 $filler = New-Object System.Windows.Forms.Panel
 $filler.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.Controls.Add($filler)
 
-# ---------------- Status area controls (inside bottomPanel -> statusArea) ----------------
-# Progress panel (top of statusArea)
+# ---------------- Status area controls ----------------
 $progressPanel = New-Object System.Windows.Forms.Panel
 $progressPanel.Dock = [System.Windows.Forms.DockStyle]::Top
 $progressPanel.Padding = [System.Windows.Forms.Padding]::new(4)
 $progressPanel.Height = 28
 $statusArea.Controls.Add($progressPanel)
-
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Dock = [System.Windows.Forms.DockStyle]::Fill
 $progressPanel.Controls.Add($progressBar)
 
-# Log area (fills remaining statusArea)
 $logPanel = New-Object System.Windows.Forms.Panel
 $logPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logPanel.Padding = [System.Windows.Forms.Padding]::new(4)
 $statusArea.Controls.Add($logPanel)
-
 $logBox = New-Object System.Windows.Forms.TextBox
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
@@ -166,29 +151,23 @@ $logBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logBox.Font = $fontMain
 $logPanel.Controls.Add($logBox)
 
-# ---------------- Buttons panel (bottom of bottomPanel) ----------------
+# Buttons area inside bottomPanel
 $buttonsPanel = New-Object System.Windows.Forms.Panel
 $buttonsPanel.Height = 60
 $buttonsPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
 $buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(6)
-$buttonsPanel.BackColor = [System.Drawing.Color]::FromArgb(250,250,250)
 $bottomPanel.Controls.Add($buttonsPanel)
-
-# Open Logs and Deploy buttons
 $openLogsBtn = New-Object System.Windows.Forms.Button
 $openLogsBtn.Text = "Open Logs"
 $openLogsBtn.Size = [System.Drawing.Size]::new(110,36)
 $openLogsBtn.Location = [System.Drawing.Point]::new(12, 12)
 $openLogsBtn.Font = $fontMain
 $buttonsPanel.Controls.Add($openLogsBtn)
-
 $deployButton = New-Object System.Windows.Forms.Button
 $deployButton.Text = "Deploy"
 $deployButton.Size = [System.Drawing.Size]::new(140,40)
 $deployButton.Font = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
 $buttonsPanel.Controls.Add($deployButton)
-
-# position deploy at right of buttonsPanel
 $placeButtons = {
     $padding = 12
     $deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - $padding
@@ -198,10 +177,9 @@ $placeButtons = {
 & $placeButtons
 $buttonsPanel.Add_Resize({ & $placeButtons })
 
-# ---------------- Logging helpers ----------------
+# ---------------- Logging helpers (fixed Invoke usage) ----------------
 function Append-LogToUI {
     param([string]$text)
-    # Action that appends text (single-arg)
     $action = {
         param($t)
         if ($logBox -and $logBox.IsHandleCreated) {
@@ -213,27 +191,22 @@ function Append-LogToUI {
         }
     }
 
-    # If call is already on UI thread, run directly (avoids cross-thread invoke)
     try {
         if ($logBox -and $logBox.IsHandleCreated -and -not $logBox.InvokeRequired) {
             & $action $text
         } elseif ($form -and $form.IsHandleCreated) {
-            # IMPORTANT: pass arguments as an array to Invoke
+            # pass arguments as array
             $form.Invoke($action, @($text)) | Out-Null
         } else {
             Write-Host $text
         }
     } catch {
-        # fallback: try BeginInvoke (async) — also needs args array
         try { $form.BeginInvoke($action, @($text)) | Out-Null } catch { Write-Host "Append-Log failed: $_" }
     }
 }
 
 function Write-Log {
-    param(
-        [string]$message,
-        [string]$logFilePath
-    )
+    param([string]$message, [string]$logFilePath)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $entry = "[$timestamp] $message"
     Append-LogToUI $message
@@ -259,7 +232,7 @@ $componentBox.Add_SelectedIndexChanged({
 })
 $componentBox.SelectedIndex = 0
 
-# ---------------- BackgroundWorker ----------------
+# ---------------- BackgroundWorker (returns structured result) ----------------
 $bw = New-Object System.ComponentModel.BackgroundWorker
 $bw.WorkerReportsProgress = $true
 $bw.WorkerSupportsCancellation = $true
@@ -280,86 +253,66 @@ $bw.add_DoWork({
 
         & $report 10 "Starting deployment..."
 
-        try {
-            $serviceStatus = Get-Service -Name $artifact_name -ErrorAction SilentlyContinue
-            if ($serviceStatus -and $serviceStatus.Status -eq 'Running') {
-                & $report 12 "Service '$artifact_name' is running. Please stop it before deployment."
-            } else {
-                & $report 12 "Service '$artifact_name' is not running. Proceeding with deployment."
-            }
-        } catch {
-            & $report 12 "Unable to query service status: $_"
-        }
-
-        & $report 20 "Preparing paths..."
-
+        # Prepare URL
         $isSnapshot = $artifact_version -like "*SNAPSHOT*"
         if ($isSnapshot) {
             $url = "$BaseSnapshotUrl/$artifact_name/$artifact_version/$artifact_name-$artifact_version.jar"
         } else {
             $url = "$BaseReleaseUrl/$artifact_name/$artifact_version/$artifact_name-$artifact_version.jar"
         }
-        & $report 25 "Constructed URL: $url"
+        & $report 20 "Constructed URL: $url"
 
+        Ensure-Path $TargetTempDir
         $targetDir   = $TargetTempDir
         $logDir      = Join-Path $targetDir "logs"
         $dateFolder  = Join-Path $logDir (Get-Date -Format "yyyy-MM-dd")
         $artifactFile = "$artifact_name-$artifact_version.jar"
         $artifactPath = Join-Path $targetDir $artifactFile
-
-        Ensure-Path $targetDir
-        Ensure-Path $logDir
-        Ensure-Path $dateFolder
+        Ensure-Path $logDir; Ensure-Path $dateFolder
 
         try {
-            & $report 40 "Downloading artifact..."
+            & $report 35 "Downloading artifact..."
             Invoke-WebRequest -Uri $url -OutFile $artifactPath -UseBasicParsing -ErrorAction Stop
             & $report 55 "Downloaded to $artifactPath"
         } catch {
-            & $report 0 "Download failed: $_"
+            $err = $_.Exception
+            & $report 0 "Download failed: $($err.Message)"
             $e.Result = @{
                 Success    = $false
-                Error      = "Download failed: $($_.Exception.Message)"
-                StackTrace = $($_.Exception.StackTrace)
+                Error      = "Download failed: $($err.Message)"
+                StackTrace = $err.StackTrace
             }
             return
         }
 
-        $deployPath = if ($component -eq "style") {
-            Join-Path $LocalStylePath $artifact_name
-        } else {
-            Join-Path $LocalAppStyle $artifact_name
-        }
-
+        & $report 60 "Verifying deployment folder..."
+        $deployPath = if ($component -eq "style") { Join-Path $LocalStylePath $artifact_name } else { Join-Path $LocalAppStyle $artifact_name }
         if (-not (Test-Path $deployPath)) {
-            & $report 65 "Deployment folder '$deployPath' does not exist."
-            $e.Result = @{
-                Success = $false
-                Error   = "Deployment folder '$deployPath' does not exist."
-            }
+            & $report 0 "Deployment folder not found: $deployPath"
+            $e.Result = @{ Success = $false; Error = "Deployment folder not found: $deployPath"; StackTrace = "" }
             return
         }
 
-        & $report 65 "Navigated to deployment folder: $deployPath"
-
+        & $report 70 "Removing existing artifact (if present)..."
         try {
             $existingJar = Join-Path $deployPath "$artifact_name.jar"
             if (Test-Path $existingJar) {
                 Remove-Item $existingJar -Force -ErrorAction Stop
-                & $report 75 "Removed existing jar: $existingJar"
+                & $report 80 "Removed existing jar: $existingJar"
             } else {
-                & $report 75 "No existing jar found to remove."
+                & $report 80 "No existing jar found."
             }
 
             $newJarPath = Join-Path $deployPath "$artifact_name.jar"
             Copy-Item -Path $artifactPath -Destination $newJarPath -Force -ErrorAction Stop
             & $report 95 "Copied new artifact to: $newJarPath"
         } catch {
-            & $report 0 "Deployment copy failed: $($_.Exception.Message)"
+            $err = $_.Exception
+            & $report 0 "Deployment file operation failed: $($err.Message)"
             $e.Result = @{
                 Success    = $false
-                Error      = "Deployment copy failed: $($_.Exception.Message)"
-                StackTrace = $($_.Exception.StackTrace)
+                Error      = "Deployment file operation failed: $($err.Message)"
+                StackTrace = $err.StackTrace
             }
             return
         }
@@ -376,10 +329,10 @@ $bw.add_DoWork({
     }
 })
 
+# ProgressChanged runs on UI thread
 $bw.add_ProgressChanged({
     param($s, $args)
     try {
-        # ProgressChanged runs on UI thread already
         if ($args.UserState) { Append-LogToUI $args.UserState }
         $progressBar.Value = [int]$args.ProgressPercentage
     } catch {
@@ -387,28 +340,40 @@ $bw.add_ProgressChanged({
     }
 })
 
+# RunWorkerCompleted shows detailed errors if present
 $bw.add_RunWorkerCompleted({
     param($s, $args)
     try {
         if ($args.Cancelled) {
             Append-LogToUI "Deployment cancelled."
             $progressBar.Value = 0
+            [System.Windows.Forms.MessageBox]::Show("Deployment cancelled.", "Cancelled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         } elseif ($args.Error) {
             Append-LogToUI "Unhandled background exception: $($args.Error.Message)"
             if ($args.Error.StackTrace) { Append-LogToUI $args.Error.StackTrace }
             $progressBar.Value = 0
+            [System.Windows.Forms.MessageBox]::Show("Deployment failed with an unhandled exception:`n" + $args.Error.Message, "Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
         } elseif ($args.Result -and $args.Result.Success) {
             Append-LogToUI "Deployment finished successfully."
             $progressBar.Value = 100
+            [System.Windows.Forms.MessageBox]::Show("Deployment finished successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         } else {
-            $err = if ($args.Result -and $args.Result.Error) {
-                $args.Result.Error
+            # Show detailed failure info
+            if ($args.Result -and $args.Result.Error) {
+                $errMsg = $args.Result.Error
+                $stack  = $args.Result.StackTrace
+                Append-LogToUI "Deployment failed: $errMsg"
+                if ($stack) { Append-LogToUI "StackTrace:`n$stack" }
+                $progressBar.Value = 0
+
+                # show a short popup, include more details in the log
+                $short = if ($errMsg.Length -gt 300) { $errMsg.Substring(0,300) + "..." } else { $errMsg }
+                [System.Windows.Forms.MessageBox]::Show("Deployment failed:`n$short", "Deployment failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
             } else {
-                "Unknown error"
+                Append-LogToUI "Deployment failed: unknown error"
+                $progressBar.Value = 0
+                [System.Windows.Forms.MessageBox]::Show("Deployment failed: unknown error. See log for details.", "Deployment failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
             }
-            Append-LogToUI "Deployment failed: $err"
-            if ($args.Result -and $args.Result.StackTrace) { Append-LogToUI $args.Result.StackTrace }
-            $progressBar.Value = 0
         }
     } catch {
         Append-LogToUI "RunWorkerCompleted handler error: $_"
@@ -417,7 +382,7 @@ $bw.add_RunWorkerCompleted({
     }
 })
 
-# ---------------- Button handlers ----------------
+# ---------------- Buttons ----------------
 $deployButton.Add_Click({
     try {
         $component        = $componentBox.SelectedItem
@@ -426,12 +391,7 @@ $deployButton.Add_Click({
         if ($artifact_version -eq $versionHint) { $artifact_version = "" }
 
         if (-not ($component -and $artifact_name -and $artifact_version)) {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Please fill all fields (component, service, version).",
-                "Missing fields",
-                [System.Windows.Forms.MessageBoxButtons]::OK,
-                [System.Windows.Forms.MessageBoxIcon]::Exclamation
-            )
+            [System.Windows.Forms.MessageBox]::Show("Please fill all fields (component, service, version).","Missing fields",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Exclamation)
             return
         }
 
@@ -441,7 +401,7 @@ $deployButton.Add_Click({
         $logFile    = Join-Path $dateFolder "${artifact_name}-${artifact_version}.log"
 
         $deployButton.Enabled = $false
-        $progressBar.Value = 10
+        $progressBar.Value = 5
         Write-Log "Starting deployment..." $logFile
 
         $args = @{
@@ -458,10 +418,14 @@ $deployButton.Add_Click({
 })
 
 $openLogsBtn.Add_Click({
-    $todayFolder = Join-Path $TargetTempDir "logs"
-    $todayFolder = Join-Path $todayFolder (Get-Date -Format "yyyy-MM-dd")
-    Ensure-Path $todayFolder
-    Start-Process explorer -ArgumentList $todayFolder
+    try {
+        $todayFolder = Join-Path $TargetTempDir "logs"
+        $todayFolder = Join-Path $todayFolder (Get-Date -Format "yyyy-MM-dd")
+        Ensure-Path $todayFolder
+        Start-Process explorer -ArgumentList $todayFolder
+    } catch {
+        Append-LogToUI "Open logs error: $_"
+    }
 })
 
 # ---------------- Startup ----------------
