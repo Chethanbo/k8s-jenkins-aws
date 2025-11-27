@@ -17,12 +17,10 @@ function Show-Dialog {
         $icon = Convert-ToEnum $Icon ([System.Windows.Forms.MessageBoxIcon]) [System.Windows.Forms.MessageBoxIcon]::None
         [System.Windows.Forms.MessageBox]::Show($Message,$Title,$btn,$icon) | Out-Null
     } catch {
-        # worst-case fallback
         [System.Windows.Forms.MessageBox]::Show($Message) | Out-Null
     }
 }
 
-# Force TLS1.2 for web requests
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ---------------- Configuration ----------------
@@ -34,10 +32,11 @@ $BaseReleaseUrl  = "https://artifactory-server.app.bankwvcs.net/artifactory/pcot
 
 function Ensure-Path { param($p) if (-not (Test-Path $p)) { New-Item -Path $p -ItemType Directory -Force | Out-Null } }
 
-# ---------------- Build simple UI ----------------
+# ---------------- Build UI ----------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "STYLE ARTIFACT DEPLOYMENT TOOL"
 $form.Size = [System.Drawing.Size]::new(820,520)
+$form.MinimumSize = [System.Drawing.Size]::new(700,380)   # ensure buttons remain visible
 $form.StartPosition = "CenterScreen"
 $form.BackColor = [System.Drawing.Color]::WhiteSmoke
 $form.Font = New-Object System.Drawing.Font("Segoe UI",10)
@@ -111,7 +110,6 @@ $componentBox.Add_SelectedIndexChanged({
     }
     if ($serviceBox.Items.Count -gt 0) { $serviceBox.SelectedIndex = 0 }
 })
-# run once to populate
 $componentBox.SelectedIndex = 0
 
 # Progress and log area
@@ -121,7 +119,7 @@ $progressBar.Size = [System.Drawing.Size]::new($labelWidth + $inputWidth + 8,18)
 $form.Controls.Add($progressBar)
 
 $logTop = $topBase + ($gapY*3) + 36
-$logHeight = 300
+$logHeight = 240
 $logBox = New-Object System.Windows.Forms.TextBox
 $logBox.Location = [System.Drawing.Point]::new($leftMargin, $logTop)
 $logBox.Size = [System.Drawing.Size]::new($labelWidth + $inputWidth + 8, $logHeight)
@@ -130,37 +128,28 @@ $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
 $form.Controls.Add($logBox)
 
-# ---------------- Buttons panel (fixed bottom) ----------------
-$buttonsPanel = New-Object System.Windows.Forms.Panel
-$buttonsPanel.Height = 56
+# ---------------- Buttons panel (FlowLayoutPanel, right-aligned) ----------------
+$buttonsPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$buttonsPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
 $buttonsPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$buttonsPanel.Height = 56
 $buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(8)
+$buttonsPanel.WrapContents = $false
 $buttonsPanel.BackColor = [System.Drawing.Color]::FromArgb(245,245,245)
 $form.Controls.Add($buttonsPanel)
-
-$openLogsBtn = New-Object System.Windows.Forms.Button
-$openLogsBtn.Text = "Open Logs"
-$openLogsBtn.Size = [System.Drawing.Size]::new(120,36)
-$openLogsBtn.Left = 12
-$openLogsBtn.Top = 10
-$openLogsBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Left
-$buttonsPanel.Controls.Add($openLogsBtn)
 
 $deployButton = New-Object System.Windows.Forms.Button
 $deployButton.Text = "Deploy"
 $deployButton.Size = [System.Drawing.Size]::new(140,40)
 $deployButton.Font = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
-# position to right side inside panel
-$deployButton.Anchor = [System.Windows.Forms.AnchorStyles]::Right
-$deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - 12
-$deployButton.Top  = [int](($buttonsPanel.ClientSize.Height - $deployButton.Height)/2)
-$buttonsPanel.Controls.Add($deployButton)
 
-# reposition on resize so it stays at right
-$buttonsPanel.Add_Resize({
-    $deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - 12
-    $deployButton.Top  = [int](($buttonsPanel.ClientSize.Height - $deployButton.Height)/2)
-})
+$openLogsBtn = New-Object System.Windows.Forms.Button
+$openLogsBtn.Text = "Open Logs"
+$openLogsBtn.Size = [System.Drawing.Size]::new(110,36)
+
+# Add buttons to panel (RightToLeft flow keeps Deploy at right)
+$buttonsPanel.Controls.Add($deployButton)
+$buttonsPanel.Controls.Add($openLogsBtn)
 
 # Logging helper
 function Append-Log {
