@@ -1,7 +1,6 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Force TLS 1.2 for downloads
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ============================================================
@@ -13,186 +12,139 @@ $TargetTempDir   = "D:\Temp\deployments"
 $BaseSnapshotUrl = "https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-snapshots-local/com/natwest/style"
 $BaseReleaseUrl  = "https://artifactory-server.app.bankwvcs.net/artifactory/pcot-style-libs-releases-local/com/natwest/style"
 
-function Ensure-Path {
-    param([string]$p)
-    if (-not (Test-Path $p)) {
-        New-Item -ItemType Directory -Force -Path $p | Out-Null
-    }
-}
+function Ensure-Path { param($p) if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force -Path $p | Out-Null } }
 
 # ============================================================
-# FORM SETUP
+# UI SETUP
 # ============================================================
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "🔧  STYLE ARTIFACT DEPLOYMENT TOOL  🔧"
-$form.Size = [System.Drawing.Size]::new(900, 650)
+$form.Text = "🔧 STYLE ARTIFACT DEPLOYMENT TOOL 🔧"
+$form.Size = [System.Drawing.Size]::new(900,650)
 $form.StartPosition = "CenterScreen"
-$form.BackColor = [System.Drawing.Color]::WhiteSmoke
-$form.AutoScaleMode = "Dpi"
+$form.BackColor = "WhiteSmoke"
 
 $fontMain = New-Object System.Drawing.Font("Segoe UI",10)
 $form.Font = $fontMain
 
-# ============================================================
-# MAIN CONTENT PANEL (TOP)
-# ============================================================
+# ------------------ Main Input Panel ------------------
 $contentPanel = New-Object System.Windows.Forms.Panel
 $contentPanel.Dock = "Top"
 $contentPanel.Height = 180
-$contentPanel.Padding = [System.Windows.Forms.Padding]::new(8)
+$contentPanel.Padding = 8
 $form.Controls.Add($contentPanel)
 
-# Layout Table for inputs
 $table = New-Object System.Windows.Forms.TableLayoutPanel
 $table.Dock = "Fill"
-$table.AutoSize = $true
 $table.ColumnCount = 2
 $table.RowCount = 3
-$table.Padding = [System.Windows.Forms.Padding]::new(6)
+$table.Padding = 6
 
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Absolute",300)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle("Percent",100)))
 
 $contentPanel.Controls.Add($table)
 
-function New-Label($text) {
-    $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = $text
-    $lbl.TextAlign = "MiddleRight"
-    $lbl.Dock = "Fill"
-    $lbl.Padding = [System.Windows.Forms.Padding]::new(0,4,8,4)
-    return $lbl
+function New-Label($t) {
+    $l = New-Object System.Windows.Forms.Label
+    $l.Text = $t
+    $l.TextAlign = "MiddleRight"
+    $l.Dock = "Fill"
+    $l.Padding = "0,4,8,4"
+    return $l
 }
 
-# ============================================================
-# INPUTS
-# ============================================================
-
 # Component
-$table.Controls.Add((New-Label "Deployment Component"), 0, 0)
+$table.Controls.Add((New-Label "Deployment Component"),0,0)
 $componentBox = New-Object System.Windows.Forms.ComboBox
-$componentBox.Dock = "Fill"
 $componentBox.DropDownStyle = "DropDownList"
+$componentBox.Dock = "Fill"
 $componentBox.Items.AddRange(@("style","style-ms"))
-$table.Controls.Add($componentBox, 1, 0)
+$table.Controls.Add($componentBox,1,0)
 
 # Service
-$table.Controls.Add((New-Label "Service Name"), 0, 1)
+$table.Controls.Add((New-Label "Service Name"),0,1)
 $serviceBox = New-Object System.Windows.Forms.ComboBox
-$serviceBox.Dock = "Fill"
 $serviceBox.DropDownStyle = "DropDownList"
-$table.Controls.Add($serviceBox, 1, 1)
+$serviceBox.Dock = "Fill"
+$table.Controls.Add($serviceBox,1,1)
 
 # Version
-$table.Controls.Add((New-Label "Artifact Version"), 0, 2)
+$table.Controls.Add((New-Label "Artifact Version"),0,2)
 $versionHint = "e.g. 1.2.3 or 1.2.3-SNAPSHOT"
 $versionBox = New-Object System.Windows.Forms.TextBox
 $versionBox.Text = $versionHint
-$versionBox.ForeColor = 'Gray'
+$versionBox.ForeColor = "Gray"
 $versionBox.Dock = "Fill"
-$versionBox.Add_Enter({
-    if ($versionBox.Text -eq $versionHint) {
-        $versionBox.Text = ""
-        $versionBox.ForeColor = "Black"
-    }
-})
-$versionBox.Add_Leave({
-    if ($versionBox.Text.Trim() -eq "") {
-        $versionBox.Text = $versionHint
-        $versionBox.ForeColor = "Gray"
-    }
-})
-$table.Controls.Add($versionBox, 1, 2)
+$versionBox.Add_Enter({ if ($versionBox.Text -eq $versionHint) { $versionBox.Text=""; $versionBox.ForeColor="Black" } })
+$versionBox.Add_Leave({ if ($versionBox.Text -eq "") { $versionBox.Text=$versionHint; $versionBox.ForeColor="Gray" } })
+$table.Controls.Add($versionBox,1,2)
 
-# SERVICE LIST POPULATION
+$componentBox.SelectedIndex = 0
+
 $componentBox.Add_SelectedIndexChanged({
     $serviceBox.Items.Clear()
     $path = if ($componentBox.SelectedItem -eq "style") { $LocalStylePath } else { $LocalAppStyle }
-
     if (Test-Path $path) {
-        Get-ChildItem -Path $path -Directory | ForEach-Object {
-            $serviceBox.Items.Add($_.Name) | Out-Null
-        }
+        Get-ChildItem $path -Directory | ForEach-Object { $serviceBox.Items.Add($_.Name) | Out-Null }
+        $serviceBox.SelectedIndex = 0
     }
-    if ($serviceBox.Items.Count -gt 0) { $serviceBox.SelectedIndex = 0 }
 })
-$componentBox.SelectedIndex = 0
 
 # ============================================================
-# LOG + STATUS AREA (BOTTOM / MEDIUM SIZE)
+# STATUS + LOG AREA (MEDIUM)
 # ============================================================
 $statusPanel = New-Object System.Windows.Forms.Panel
 $statusPanel.Dock = "Fill"
-$statusPanel.Padding = [System.Windows.Forms.Padding]::new(8)
+$statusPanel.Padding = 8
 $form.Controls.Add($statusPanel)
 
-# Progress bar
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Height = 22
 $progressBar.Dock = "Top"
+$progressBar.Height = 22
 $statusPanel.Controls.Add($progressBar)
 
-# Log box (medium height)
 $logBox = New-Object System.Windows.Forms.TextBox
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
-$logBox.WordWrap = $false
 $logBox.Dock = "Fill"
 $logBox.Font = $fontMain
 $statusPanel.Controls.Add($logBox)
 
 # ============================================================
-# BUTTONS PANEL
+# BUTTON PANEL
 # ============================================================
-$buttonsPanel = New-Object System.Windows.Forms.Panel
-$buttonsPanel.Dock = "Bottom"
-$buttonsPanel.Height = 60
-$buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(8)
-$form.Controls.Add($buttonsPanel)
+$btnPanel = New-Object System.Windows.Forms.Panel
+$btnPanel.Dock = "Bottom"
+$btnPanel.Height = 60
+$btnPanel.Padding = 8
+$form.Controls.Add($btnPanel)
 
 $openLogsBtn = New-Object System.Windows.Forms.Button
 $openLogsBtn.Text = "Open Logs"
 $openLogsBtn.Width = 120
 $openLogsBtn.Height = 36
 $openLogsBtn.Left = 10
-$openLogsBtn.Top = 12
-$buttonsPanel.Controls.Add($openLogsBtn)
+$openLogsBtn.Top = 10
+$btnPanel.Controls.Add($openLogsBtn)
 
 $deployButton = New-Object System.Windows.Forms.Button
 $deployButton.Text = "Deploy"
 $deployButton.Width = 140
 $deployButton.Height = 40
-$deployButton.Left = $buttonsPanel.Width - $deployButton.Width - 10
+$deployButton.Left = $btnPanel.Width - 160
 $deployButton.Top = 10
 $deployButton.Anchor = "Right"
-$deployButton.Font = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
-$buttonsPanel.Controls.Add($deployButton)
+$btnPanel.Controls.Add($deployButton)
 
 # ============================================================
-# LOGGING HELPERS
+# LOG FUNCTIONS
 # ============================================================
-function Append-Log {
-    param([string]$text)
-    $timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    $entry = "[$timestamp] $text`r`n"
-
-    if ($logBox.InvokeRequired) {
-        $logBox.Invoke([Action]{ $logBox.AppendText($entry) })
-    } else {
-        $logBox.AppendText($entry)
-    }
-}
-
-function Write-FileLog {
-    param([string]$message, [string]$file)
-
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $entry = "[$timestamp] $message"
-
-    Append-Log $message
-    Ensure-Path (Split-Path $file -Parent)
-    Add-Content $file $entry
+function Log { param($msg)
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$ts] $msg`r`n"
+    if ($logBox.InvokeRequired) { $logBox.Invoke([Action]{ $logBox.AppendText($line) }) }
+    else { $logBox.AppendText($line) }
 }
 
 # ============================================================
@@ -201,102 +153,78 @@ function Write-FileLog {
 $bw = New-Object System.ComponentModel.BackgroundWorker
 $bw.WorkerReportsProgress = $true
 
-$bw.DoWork += {
-    param($sender,$e)
+# DO WORK (Correct PS5 syntax)
+$bw.add_DoWork({
+    param($s,$e)
 
-    $args = $e.Argument
-    $component = $args.Component
-    $artifact = $args.Artifact
-    $version = $args.Version
-    $logFile = $args.LogFile
+    $p = $e.Argument
 
     try {
-        $sender.ReportProgress(10, "Starting deployment...")
-        Write-FileLog "Starting deployment..." $logFile
+        $s.ReportProgress(10,"Starting deployment...")
+        Log "Starting deployment..."
 
-        # URL
-        $isSnap = $version -like "*SNAPSHOT*"
+        $isSnap = $p.Version -like "*SNAPSHOT*"
         $url = if ($isSnap) {
-            "$BaseSnapshotUrl/$artifact/$version/$artifact-$version.jar"
+            "$BaseSnapshotUrl/$p.Artifact/$p.Version/$p.Artifact-$p.Version.jar"
         } else {
-            "$BaseReleaseUrl/$artifact/$version/$artifact-$version.jar"
+            "$BaseReleaseUrl/$p.Artifact/$p.Version/$p.Artifact-$p.Version.jar"
         }
 
-        $sender.ReportProgress(20, "Downloading from $url")
-        Write-FileLog "Downloading: $url" $logFile
+        Log "Downloading: $url"
+        $s.ReportProgress(30)
 
         Ensure-Path $TargetTempDir
-        $artifactPath = Join-Path $TargetTempDir "$artifact-$version.jar"
+        $artifactPath = Join-Path $TargetTempDir "$($p.Artifact)-$($p.Version).jar"
 
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $artifactPath -UseBasicParsing -ErrorAction Stop
-        }
-        catch {
-            $e.Result = @{ Success = $false; Message = "Download failed: $($_.Exception.Message)" }
-            return
-        }
+        Invoke-WebRequest -Uri $url -OutFile $artifactPath -UseBasicParsing -ErrorAction Stop
 
-        $sender.ReportProgress(50, "Download complete.")
-
-        # Deployment path
-        $deployPath = if ($component -eq "style") {
-            Join-Path $LocalStylePath $artifact
+        $deployPath = if ($p.Component -eq "style") {
+            Join-Path $LocalStylePath $p.Artifact
         } else {
-            Join-Path $LocalAppStyle $artifact
+            Join-Path $LocalAppStyle $p.Artifact
         }
 
         if (-not (Test-Path $deployPath)) {
-            $e.Result = @{ Success=$false; Message="Deployment folder not found: $deployPath" }
+            $e.Result = @{ Success=$false; Message="Deployment folder missing: $deployPath" }
             return
         }
 
-        # Remove old & copy new
-        $existingJar = Join-Path $deployPath "$artifact.jar"
+        $existingJar = Join-Path $deployPath "$($p.Artifact).jar"
         if (Test-Path $existingJar) { Remove-Item $existingJar -Force }
 
-        Copy-Item $artifactPath (Join-Path $deployPath "$artifact.jar") -Force
+        Copy-Item $artifactPath $existingJar -Force
 
-        $sender.ReportProgress(100, "Deployment completed.")
-        $e.Result = @{ Success = $true }
-    }
-    catch {
+        $e.Result = @{ Success=$true }
+        $s.ReportProgress(100)
+
+    } catch {
         $e.Result = @{ Success=$false; Message=$_.Exception.Message }
     }
-}
+})
 
-# Progress updates
-$bw.ProgressChanged += {
+# Progress handler
+$bw.add_ProgressChanged({
     param($s,$args)
     $progressBar.Value = $args.ProgressPercentage
-    if ($args.UserState) { Append-Log $args.UserState }
-}
+    if ($args.UserState) { Log $args.UserState }
+})
 
-# When finished
-$bw.RunWorkerCompleted += {
+# Completion handler
+$bw.add_RunWorkerCompleted({
     param($s,$args)
 
     if ($args.Result -and -not $args.Result.Success) {
-        Append-Log "Deployment failed: $($args.Result.Message)"
-        [System.Windows.Forms.MessageBox]::Show(
-            $args.Result.Message,
-            "Deployment Failed",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Error
-        )
+        Log "Deployment failed: $($args.Result.Message)"
+        [System.Windows.Forms.MessageBox]::Show($args.Result.Message,"Deployment Failed","OK","Error")
         return
     }
 
-    Append-Log "Deployment successful."
-    [System.Windows.Forms.MessageBox]::Show(
-        "Deployment completed successfully.",
-        "Success",
-        [System.Windows.Forms.MessageBoxButtons]::OK,
-        [System.Windows.Forms.MessageBoxIcon]::Information
-    )
-}
+    Log "Deployment successful."
+    [System.Windows.Forms.MessageBox]::Show("Deployment completed successfully.","Success","OK","Information")
+})
 
 # ============================================================
-# UI EVENTS
+# BUTTON EVENTS
 # ============================================================
 $deployButton.Add_Click({
     $component = $componentBox.SelectedItem
@@ -304,24 +232,25 @@ $deployButton.Add_Click({
     $version   = $versionBox.Text.Trim()
 
     if ($version -eq $versionHint) { $version = "" }
-
     if (-not ($component -and $artifact -and $version)) {
         [System.Windows.Forms.MessageBox]::Show("Please fill all fields.")
         return
     }
 
-    $logFolder = Join-Path $TargetTempDir "logs"
-    $today = Get-Date -Format "yyyy-MM-dd"
-    $folder = Join-Path $logFolder $today
-    Ensure-Path $folder
-    $logFile = Join-Path $folder "$artifact-$version.log"
+    $logDir = Join-Path $TargetTempDir "logs"
+    $todayFolder = Join-Path $logDir (Get-Date -Format "yyyy-MM-dd")
+    Ensure-Path $todayFolder
+
+    $logFile = Join-Path $todayFolder "$artifact-$version.log"
 
     $progressBar.Value = 0
+    $logBox.Clear()
+
     $bw.RunWorkerAsync(@{
-        Component = $component
-        Artifact  = $artifact
-        Version   = $version
-        LogFile   = $logFile
+        Component=$component
+        Artifact=$artifact
+        Version=$version
+        LogFile=$logFile
     })
 })
 
@@ -335,4 +264,4 @@ $openLogsBtn.Add_Click({
 # SHOW UI
 # ============================================================
 $form.Topmost = $true
-$form.ShowDialog() | Out-Null
+$form.ShowDialog()
