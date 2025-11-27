@@ -130,22 +130,37 @@ $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
 $form.Controls.Add($logBox)
 
-# Buttons
-$btnHeight = 36
-$deployButton = New-Object System.Windows.Forms.Button
-$deployButton.Text = "Deploy"
-$deployButton.Size = [System.Drawing.Size]::new(120, $btnHeight)
-# position right-bottom-ish but still visible when minimized
-$deployButton.Location = [System.Drawing.Point]::new($form.ClientSize.Width - $deployButton.Width - 20, $logTop + $logHeight + 8)
-$deployButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
-$form.Controls.Add($deployButton)
+# ---------------- Buttons panel (fixed bottom) ----------------
+$buttonsPanel = New-Object System.Windows.Forms.Panel
+$buttonsPanel.Height = 56
+$buttonsPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
+$buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(8)
+$buttonsPanel.BackColor = [System.Drawing.Color]::FromArgb(245,245,245)
+$form.Controls.Add($buttonsPanel)
 
 $openLogsBtn = New-Object System.Windows.Forms.Button
 $openLogsBtn.Text = "Open Logs"
-$openLogsBtn.Size = [System.Drawing.Size]::new(120, $btnHeight)
-$openLogsBtn.Location = [System.Drawing.Point]::new($deployButton.Location.X - 140, $deployButton.Location.Y)
-$openLogsBtn.Anchor = $deployButton.Anchor
-$form.Controls.Add($openLogsBtn)
+$openLogsBtn.Size = [System.Drawing.Size]::new(120,36)
+$openLogsBtn.Left = 12
+$openLogsBtn.Top = 10
+$openLogsBtn.Anchor = [System.Windows.Forms.AnchorStyles]::Left
+$buttonsPanel.Controls.Add($openLogsBtn)
+
+$deployButton = New-Object System.Windows.Forms.Button
+$deployButton.Text = "Deploy"
+$deployButton.Size = [System.Drawing.Size]::new(140,40)
+$deployButton.Font = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
+# position to right side inside panel
+$deployButton.Anchor = [System.Windows.Forms.AnchorStyles]::Right
+$deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - 12
+$deployButton.Top  = [int](($buttonsPanel.ClientSize.Height - $deployButton.Height)/2)
+$buttonsPanel.Controls.Add($deployButton)
+
+# reposition on resize so it stays at right
+$buttonsPanel.Add_Resize({
+    $deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - 12
+    $deployButton.Top  = [int](($buttonsPanel.ClientSize.Height - $deployButton.Height)/2)
+})
 
 # Logging helper
 function Append-Log {
