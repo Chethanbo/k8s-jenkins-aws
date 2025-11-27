@@ -1,0 +1,86 @@
+function Download-Artifact {
+    param(
+        [string]$DownloadUrl,
+        [string]$OutFile,
+        [string]$User,
+        [string]$Pass,
+        [System.Windows.Forms.ProgressBar]$ProgressBar,
+        [System.Windows.Forms.Label]$ProgressLabel
+    )
+
+    $wc = New-Object System.Net.WebClient
+
+    # Basic Auth (optional)
+    if ($User -and $Pass) {
+        $pair = $User + ":" + $Pass
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($pair)
+        $b64 = [System.Convert]::ToBase64String($bytes)
+        $wc.Headers.Add("Authorization", "Basic " + $b64)
+    }
+
+    $script:DownloadDone = $false
+    $script:DownloadError = $null
+
+    # ---- Progress Changed Handler (NO interpolation, NO KB keyword) ----
+    $wc.DownloadProgressChanged += {
+        param($sender, $e)
+
+        try {
+            if ($ProgressBar) {
+                $ProgressBar.Value = [int]$e.ProgressPercentage
+            }
+
+            if ($ProgressLabel) {
+                $received = [Math]::Round(($e.BytesReceived / 1024), 2)
+                $total    = [Math]::Round(($e.TotalBytesToReceive / 1024), 2)
+
+                $text = "Downloading: " + $e.ProgressPercentage + "% (" +
+                        $received + " KB / " + $total + " KB)"
+
+                $ProgressLabel.Text = $text
+            }
+        } catch {
+            # swallow UI errors
+        }
+    }
+
+    # ---- Completed Handler ----
+    $wc.DownloadFileCompleted += {
+        param($sender, $e)
+        if ($e.Error) {
+            $script:DownloadError = $e.Error
+        }
+        elseif ($e.Cancelled) {
+            $script:DownloadError = "Cancelled"
+        }
+        else {
+            $script:DownloadDone = $true
+        }
+    }
+
+    try {
+        Log-Message "Starting download: $DownloadUrl"
+
+        $uri = [System.Uri]::new($DownloadUrl)
+        $wc.DownloadFileAsync($uri, $OutFile)
+
+        while (-not $script:DownloadDone -and -not $script:DownloadError) {
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        if ($script:DownloadError) {
+            throw $script:DownloadError
+        }
+
+        Log-Message "Download completed: $OutFile"
+        return $OutFile
+    }
+    catch {
+        Log-Message "Download error: $_" "ERROR"
+        throw $_
+    }
+    finally {
+        $wc.Dispose()
+    }
+}
