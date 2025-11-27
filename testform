@@ -32,7 +32,6 @@ $fontMain = New-Object System.Drawing.Font("Segoe UI",10)
 $form.Font = $fontMain
 
 # Bottom panel (will contain status area on top and buttons below)
-# increased height so status/log area is larger on screen
 $bottomPanel = New-Object System.Windows.Forms.Panel
 $bottomPanel.Height = 360
 $bottomPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
@@ -42,7 +41,6 @@ $form.Controls.Add($bottomPanel)
 
 # Create status area inside bottomPanel (progress + logs) — dock top of bottomPanel
 $statusArea = New-Object System.Windows.Forms.Panel
-# increased height so log box is visibly larger
 $statusArea.Height = 300
 $statusArea.Dock = [System.Windows.Forms.DockStyle]::Top
 $statusArea.Padding = [System.Windows.Forms.Padding]::new(6)
@@ -52,7 +50,6 @@ $bottomPanel.Controls.Add($statusArea)
 # content container fills the window (no internal header)
 $contentPanel = New-Object System.Windows.Forms.Panel
 $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-# slightly reduce top padding so inputs sit a bit higher
 $contentPanel.Padding = [System.Windows.Forms.Padding]::new(8)
 $form.Controls.Add($contentPanel)
 
@@ -204,6 +201,7 @@ $buttonsPanel.Add_Resize({ & $placeButtons })
 # ---------------- Logging helpers ----------------
 function Append-LogToUI {
     param([string]$text)
+    # Action that appends text (single-arg)
     $action = {
         param($t)
         if ($logBox -and $logBox.IsHandleCreated) {
@@ -214,10 +212,20 @@ function Append-LogToUI {
             Write-Host $t
         }
     }
-    if ($form -and $form.IsHandleCreated) {
-        $form.Invoke($action, $text) | Out-Null
-    } else {
-        Write-Host $text
+
+    # If call is already on UI thread, run directly (avoids cross-thread invoke)
+    try {
+        if ($logBox -and $logBox.IsHandleCreated -and -not $logBox.InvokeRequired) {
+            & $action $text
+        } elseif ($form -and $form.IsHandleCreated) {
+            # IMPORTANT: pass arguments as an array to Invoke
+            $form.Invoke($action, @($text)) | Out-Null
+        } else {
+            Write-Host $text
+        }
+    } catch {
+        # fallback: try BeginInvoke (async) — also needs args array
+        try { $form.BeginInvoke($action, @($text)) | Out-Null } catch { Write-Host "Append-Log failed: $_" }
     }
 }
 
@@ -371,9 +379,9 @@ $bw.add_DoWork({
 $bw.add_ProgressChanged({
     param($s, $args)
     try {
-        $msg = $args.UserState
-        if ($msg -is [string]) { Append-LogToUI $msg }
-        [void]($progressBar.Value = $args.ProgressPercentage)
+        # ProgressChanged runs on UI thread already
+        if ($args.UserState) { Append-LogToUI $args.UserState }
+        $progressBar.Value = [int]$args.ProgressPercentage
     } catch {
         Append-LogToUI "ProgressChanged handler error: $_"
     }
@@ -384,14 +392,14 @@ $bw.add_RunWorkerCompleted({
     try {
         if ($args.Cancelled) {
             Append-LogToUI "Deployment cancelled."
-            [void]($progressBar.Value = 0)
+            $progressBar.Value = 0
         } elseif ($args.Error) {
             Append-LogToUI "Unhandled background exception: $($args.Error.Message)"
             if ($args.Error.StackTrace) { Append-LogToUI $args.Error.StackTrace }
-            [void]($progressBar.Value = 0)
+            $progressBar.Value = 0
         } elseif ($args.Result -and $args.Result.Success) {
             Append-LogToUI "Deployment finished successfully."
-            [void]($progressBar.Value = 100)
+            $progressBar.Value = 100
         } else {
             $err = if ($args.Result -and $args.Result.Error) {
                 $args.Result.Error
@@ -399,10 +407,8 @@ $bw.add_RunWorkerCompleted({
                 "Unknown error"
             }
             Append-LogToUI "Deployment failed: $err"
-            if ($args.Result -and $args.Result.StackTrace) {
-                Append-LogToUI $args.Result.StackTrace
-            }
-            [void]($progressBar.Value = 0)
+            if ($args.Result -and $args.Result.StackTrace) { Append-LogToUI $args.Result.StackTrace }
+            $progressBar.Value = 0
         }
     } catch {
         Append-LogToUI "RunWorkerCompleted handler error: $_"
@@ -435,7 +441,7 @@ $deployButton.Add_Click({
         $logFile    = Join-Path $dateFolder "${artifact_name}-${artifact_version}.log"
 
         $deployButton.Enabled = $false
-        [void]($progressBar.Value = 10)
+        $progressBar.Value = 10
         Write-Log "Starting deployment..." $logFile
 
         $args = @{
