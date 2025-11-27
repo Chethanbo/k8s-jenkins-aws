@@ -21,7 +21,7 @@ function Ensure-Path {
 
 # ---------------- Build UI ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "🔧  STYLE ARTIFACT DEPLOYMENT TOOL  🔧"
+$form.Text = "🔧  STYLE ARTIFACT DEPLOYMENT TOOL  🔧"   # OS window bar title
 $form.Size = [System.Drawing.Size]::new(980, 680)
 $form.MinimumSize = [System.Drawing.Size]::new(760, 480)
 $form.StartPosition = "CenterScreen"
@@ -31,7 +31,7 @@ $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 $fontMain = New-Object System.Drawing.Font("Segoe UI",10)
 $form.Font = $fontMain
 
-# Bottom panel (status + buttons)
+# Bottom panel (will contain status area on top and buttons below)
 $bottomPanel = New-Object System.Windows.Forms.Panel
 $bottomPanel.Height = 360
 $bottomPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
@@ -39,7 +39,7 @@ $bottomPanel.Padding = [System.Windows.Forms.Padding]::new(8)
 $bottomPanel.BackColor = [System.Drawing.Color]::FromArgb(250,250,250)
 $form.Controls.Add($bottomPanel)
 
-# Create status area inside bottomPanel (progress + logs)
+# Create status area inside bottomPanel (progress + logs) — dock top of bottomPanel
 $statusArea = New-Object System.Windows.Forms.Panel
 $statusArea.Height = 300
 $statusArea.Dock = [System.Windows.Forms.DockStyle]::Top
@@ -53,7 +53,7 @@ $contentPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.Padding = [System.Windows.Forms.Padding]::new(8)
 $form.Controls.Add($contentPanel)
 
-# ---------------- Inputs table ----------------
+# ---------------- Table for labels/inputs at top of contentPanel ----------------
 $table = New-Object System.Windows.Forms.TableLayoutPanel
 $table.Dock = [System.Windows.Forms.DockStyle]::Top
 $table.AutoSize = $true
@@ -66,6 +66,8 @@ $labelColumnWidth = 300
 $table.ColumnStyles.Clear()
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, $labelColumnWidth)))
 $table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+
+$table.RowStyles.Clear()
 for ($r = 0; $r -lt $table.RowCount; $r++) {
     $table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
 }
@@ -83,9 +85,10 @@ function New-RightLabel($text) {
     return $lbl
 }
 
-# Component
+# Row0 - Component
 $lblComponent = New-RightLabel "Deployment Component"
 $table.Controls.Add($lblComponent, 0, 0)
+
 $componentBox = New-Object System.Windows.Forms.ComboBox
 $componentBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $componentBox.Items.AddRange(@("style","style-ms"))
@@ -95,9 +98,10 @@ $componentBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $componentBox.Font = $fontMain
 $table.Controls.Add($componentBox, 1, 0)
 
-# Service
+# Row1 - Service
 $lblService = New-RightLabel "Service Name"
 $table.Controls.Add($lblService, 0, 1)
+
 $serviceBox = New-Object System.Windows.Forms.ComboBox
 $serviceBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $serviceBox.Dock = [System.Windows.Forms.DockStyle]::Fill
@@ -105,9 +109,10 @@ $serviceBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $serviceBox.Font = $fontMain
 $table.Controls.Add($serviceBox, 1, 1)
 
-# Version
+# Row2 - Version with hint
 $lblVersion = New-RightLabel "Artifact Version"
 $table.Controls.Add($lblVersion, 0, 2)
+
 $versionHint = "e.g. 1.2.3 or 1.2.3-SNAPSHOT"
 $versionBox = New-Object System.Windows.Forms.TextBox
 $versionBox.Text = $versionHint
@@ -115,33 +120,43 @@ $versionBox.ForeColor = [System.Drawing.Color]::Gray
 $versionBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $versionBox.Margin = [System.Windows.Forms.Padding]::new(4)
 $versionBox.Font = $fontMain
-$versionBox.Add_Enter({ if ($versionBox.Text -eq $versionHint) { $versionBox.Text = ""; $versionBox.ForeColor = [System.Drawing.Color]::Black } })
-$versionBox.Add_Leave({ if ([string]::IsNullOrWhiteSpace($versionBox.Text)) { $versionBox.Text = $versionHint; $versionBox.ForeColor = [System.Drawing.Color]::Gray } })
+$versionBox.Add_Enter({
+    if ($versionBox.Text -eq $versionHint) { $versionBox.Text = ""; $versionBox.ForeColor = [System.Drawing.Color]::Black }
+})
+$versionBox.Add_Leave({
+    if ([string]::IsNullOrWhiteSpace($versionBox.Text)) { $versionBox.Text = $versionHint; $versionBox.ForeColor = [System.Drawing.Color]::Gray }
+})
 $table.Controls.Add($versionBox, 1, 2)
 
-# small spacer + flexible filler
+# Put a small spacer under inputs instead of a huge filler
 $spacer = New-Object System.Windows.Forms.Panel
 $spacer.Height = 12
 $spacer.Dock = [System.Windows.Forms.DockStyle]::Top
 $contentPanel.Controls.Add($spacer)
+
+# Keep a small flexible filler so contentPanel doesn't create a huge top gap
 $filler = New-Object System.Windows.Forms.Panel
 $filler.Dock = [System.Windows.Forms.DockStyle]::Fill
 $contentPanel.Controls.Add($filler)
 
-# ---------------- Status area controls ----------------
+# ---------------- Status area controls (inside bottomPanel -> statusArea) ----------------
+# Progress panel (top of statusArea)
 $progressPanel = New-Object System.Windows.Forms.Panel
 $progressPanel.Dock = [System.Windows.Forms.DockStyle]::Top
 $progressPanel.Padding = [System.Windows.Forms.Padding]::new(4)
 $progressPanel.Height = 28
 $statusArea.Controls.Add($progressPanel)
+
 $progressBar = New-Object System.Windows.Forms.ProgressBar
 $progressBar.Dock = [System.Windows.Forms.DockStyle]::Fill
 $progressPanel.Controls.Add($progressBar)
 
+# Log area (fills remaining statusArea)
 $logPanel = New-Object System.Windows.Forms.Panel
 $logPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logPanel.Padding = [System.Windows.Forms.Padding]::new(4)
 $statusArea.Controls.Add($logPanel)
+
 $logBox = New-Object System.Windows.Forms.TextBox
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
@@ -151,23 +166,28 @@ $logBox.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logBox.Font = $fontMain
 $logPanel.Controls.Add($logBox)
 
-# Buttons area inside bottomPanel
+# ---------------- Buttons panel (bottom of bottomPanel) ----------------
 $buttonsPanel = New-Object System.Windows.Forms.Panel
 $buttonsPanel.Height = 60
 $buttonsPanel.Dock = [System.Windows.Forms.DockStyle]::Bottom
 $buttonsPanel.Padding = [System.Windows.Forms.Padding]::new(6)
+$buttonsPanel.BackColor = [System.Drawing.Color]::FromArgb(250,250,250)
 $bottomPanel.Controls.Add($buttonsPanel)
+
+# Open Logs and Deploy buttons
 $openLogsBtn = New-Object System.Windows.Forms.Button
 $openLogsBtn.Text = "Open Logs"
 $openLogsBtn.Size = [System.Drawing.Size]::new(110,36)
 $openLogsBtn.Location = [System.Drawing.Point]::new(12, 12)
 $openLogsBtn.Font = $fontMain
 $buttonsPanel.Controls.Add($openLogsBtn)
+
 $deployButton = New-Object System.Windows.Forms.Button
 $deployButton.Text = "Deploy"
 $deployButton.Size = [System.Drawing.Size]::new(140,40)
 $deployButton.Font = New-Object System.Drawing.Font("Segoe UI",11,[System.Drawing.FontStyle]::Bold)
 $buttonsPanel.Controls.Add($deployButton)
+
 $placeButtons = {
     $padding = 12
     $deployButton.Left = $buttonsPanel.ClientSize.Width - $deployButton.Width - $padding
@@ -206,7 +226,10 @@ function Append-LogToUI {
 }
 
 function Write-Log {
-    param([string]$message, [string]$logFilePath)
+    param(
+        [string]$message,
+        [string]$logFilePath
+    )
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $entry = "[$timestamp] $message"
     Append-LogToUI $message
@@ -232,7 +255,7 @@ $componentBox.Add_SelectedIndexChanged({
 })
 $componentBox.SelectedIndex = 0
 
-# ---------------- BackgroundWorker (returns structured result) ----------------
+# ---------------- BackgroundWorker ----------------
 $bw = New-Object System.ComponentModel.BackgroundWorker
 $bw.WorkerReportsProgress = $true
 $bw.WorkerSupportsCancellation = $true
@@ -329,7 +352,6 @@ $bw.add_DoWork({
     }
 })
 
-# ProgressChanged runs on UI thread
 $bw.add_ProgressChanged({
     param($s, $args)
     try {
@@ -340,14 +362,41 @@ $bw.add_ProgressChanged({
     }
 })
 
-# RunWorkerCompleted shows detailed errors if present
+# ---------------- RunWorkerCompleted (debugging replacement) ----------------
 $bw.add_RunWorkerCompleted({
     param($s, $args)
     try {
+        Append-LogToUI "=== RunWorkerCompleted invoked (debug) ==="
+        # Basic status
+        Append-LogToUI ("Cancelled: " + [string]$args.Cancelled)
+        Append-LogToUI ("Has Error object: " + ([bool]::Parse((if ($args.Error) { "True" } else { "False" }))))
+        Append-LogToUI ("Has Result object: " + ([bool]::Parse((if ($args.Result) { "True" } else { "False" }))))
+
+        # Dump args.Error if present
+        if ($args.Error) {
+            Append-LogToUI "-> args.Error.ToString():"
+            Append-LogToUI $args.Error.ToString()
+            if ($args.Error.StackTrace) { Append-LogToUI "-> args.Error.StackTrace:"; Append-LogToUI $args.Error.StackTrace }
+        }
+
+        # Dump args.Result if present
+        if ($args.Result) {
+            try {
+                Append-LogToUI "-> args.Result (ConvertTo-Json):"
+                $json = $null
+                try { $json = ConvertTo-Json $args.Result -Depth 6 } catch { $json = $args.Result.ToString() }
+                Append-LogToUI $json
+            } catch {
+                Append-LogToUI "-> Failed to ConvertTo-Json result: $_"
+                Append-LogToUI ("Result.ToString(): " + $args.Result.ToString())
+            }
+        }
+
+        # Original handling (preserve user messages)
         if ($args.Cancelled) {
             Append-LogToUI "Deployment cancelled."
             $progressBar.Value = 0
-            [System.Windows.Forms.MessageBox]::Show("Deployment cancelled.", "Cancelled", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+            [System.Windows.Forms.MessageBox]::Show("Deployment cancelled.","Cancelled",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         } elseif ($args.Error) {
             Append-LogToUI "Unhandled background exception: $($args.Error.Message)"
             if ($args.Error.StackTrace) { Append-LogToUI $args.Error.StackTrace }
@@ -358,31 +407,28 @@ $bw.add_RunWorkerCompleted({
             $progressBar.Value = 100
             [System.Windows.Forms.MessageBox]::Show("Deployment finished successfully.", "Success", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
         } else {
-            # Show detailed failure info
             if ($args.Result -and $args.Result.Error) {
                 $errMsg = $args.Result.Error
                 $stack  = $args.Result.StackTrace
                 Append-LogToUI "Deployment failed: $errMsg"
                 if ($stack) { Append-LogToUI "StackTrace:`n$stack" }
                 $progressBar.Value = 0
-
-                # show a short popup, include more details in the log
                 $short = if ($errMsg.Length -gt 300) { $errMsg.Substring(0,300) + "..." } else { $errMsg }
                 [System.Windows.Forms.MessageBox]::Show("Deployment failed:`n$short", "Deployment failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
             } else {
-                Append-LogToUI "Deployment failed: unknown error"
+                Append-LogToUI "Deployment failed: unknown error (debug info above)"
                 $progressBar.Value = 0
-                [System.Windows.Forms.MessageBox]::Show("Deployment failed: unknown error. See log for details.", "Deployment failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+                [System.Windows.Forms.MessageBox]::Show("Deployment failed: unknown error. Debug info written to log.", "Deployment failed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
             }
         }
     } catch {
-        Append-LogToUI "RunWorkerCompleted handler error: $_"
+        Append-LogToUI "RunWorkerCompleted debug handler failed: $_"
     } finally {
         $deployButton.Enabled = $true
     }
 })
 
-# ---------------- Buttons ----------------
+# ---------------- Button handlers ----------------
 $deployButton.Add_Click({
     try {
         $component        = $componentBox.SelectedItem
@@ -391,7 +437,12 @@ $deployButton.Add_Click({
         if ($artifact_version -eq $versionHint) { $artifact_version = "" }
 
         if (-not ($component -and $artifact_name -and $artifact_version)) {
-            [System.Windows.Forms.MessageBox]::Show("Please fill all fields (component, service, version).","Missing fields",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Exclamation)
+            [System.Windows.Forms.MessageBox]::Show(
+                "Please fill all fields (component, service, version).",
+                "Missing fields",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Exclamation
+            )
             return
         }
 
